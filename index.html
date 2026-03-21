@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Breathe</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { overflow: hidden; background: #9ecfee; font-family: system-ui, sans-serif; }
+
+    #overlay {
+      position: fixed; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      background: rgba(0, 0, 0, 0.52);
+      color: #fff;
+    }
+    #overlay h1 {
+      font-size: 2.2rem; font-weight: 300;
+      letter-spacing: 0.12em; margin-bottom: 0.4rem;
+    }
+    #overlay .sub { font-size: 1rem; opacity: 0.65; }
+    #overlay .hint {
+      margin-top: 1.1rem; font-size: 0.78rem;
+      opacity: 0.45; letter-spacing: 0.04em;
+    }
+
+    #crosshair {
+      display: none; position: fixed;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 16px; height: 16px;
+      pointer-events: none;
+    }
+    #crosshair::before, #crosshair::after {
+      content: ''; position: absolute;
+      background: rgba(255, 255, 255, 0.72);
+    }
+    #crosshair::before { width: 2px; height: 100%; left: 50%; transform: translateX(-50%); }
+    #crosshair::after  { height: 2px; width: 100%; top: 50%;  transform: translateY(-50%); }
+
+    #joystick-base {
+      display: none; position: fixed;
+      width: 112px; height: 112px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.22);
+      background: rgba(255,255,255,0.05);
+      transform: translate(-50%, -50%);
+      pointer-events: none; z-index: 10;
+    }
+    #joystick-knob {
+      position: absolute; width: 50px; height: 50px; border-radius: 50%;
+      background: rgba(255,255,255,0.20);
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+    }
+
+    #vignette {
+      position: fixed; inset: 0; pointer-events: none;
+      background: radial-gradient(ellipse at center,
+        transparent 55%, rgba(10, 6, 20, 0.72) 100%);
+    }
+  </style>
+</head>
+<body>
+
+<div id="overlay">
+  <h1>Breathe</h1>
+  <p class="sub">Click to enter</p>
+  <p class="hint">WASD &nbsp;·&nbsp; move &nbsp;&nbsp;|&nbsp;&nbsp; Mouse &nbsp;·&nbsp; look &nbsp;&nbsp;|&nbsp;&nbsp; ESC &nbsp;·&nbsp; pause</p>
+</div>
+<div id="crosshair"></div>
+<div id="vignette"></div>
+<div id="joystick-base"><div id="joystick-knob"></div></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three":          "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+    "three/addons/":  "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
+import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+
+// ─── RENDERER ────────────────────────────────────────────────────────────────
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 0.82;
+document.body.appendChild(renderer.domElement);
+
+// ─── SCENE ───────────────────────────────────────────────────────────────────
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x5a7a60); // forest canopy, lighter
+scene.fog = new THREE.Fog(0x4a6a50, 6, 55);   // close forest mist
+
+const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
+camera.position.set(0, 1.62, 2.2);
+
+// ─── POST-PROCESSING ─────────────────────────────────────────────────────────
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+const bloomPass = new UnrealBloomPass(
+  new THREE.Vector2(window.innerWidth, window.innerHeight),
+  0.75,  // strength
+  0.50,  // radius
+  0.82   // threshold — raised so only bright edges/lights bloom, not the whole sky
+);
+composer.addPass(bloomPass);
+composer.addPass(new OutputPass());
+
+// ─── ROOM DIMENSIONS ─────────────────────────────────────────────────────────
+const RW = 5.0;   // width  (x)
+const RH = 2.65;  // height (y)
+const RD = 6.5;   // depth  (z)
+// Window is on the FRONT wall (z = −RD/2), so camera starts looking at it.
+// Camera default look-direction is −z, so this is natural.
+
+// ─── LIGHTING ────────────────────────────────────────────────────────────────
+// Warm indoor ambient
+scene.add(new THREE.AmbientLight(0xc8d8b8, 0.42)); // cool green-filtered forest light
+
+// Sunlight through window – slightly angled cool daylight
+const sun = new THREE.DirectionalLight(0xd8e8c8, 2.0); // dappled canopy light
+sun.position.set(-1.8, 3.5, -RD / 2 - 5);
+sun.target.position.set(1.2, 0.2, 1.0);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far  = 22;
+sun.shadow.camera.left = -6;  sun.shadow.camera.right  = 6;
+sun.shadow.camera.top  =  5;  sun.shadow.camera.bottom = -3;
+sun.shadow.bias = -0.002;
+scene.add(sun);
+scene.add(sun.target);
+
+// Soft warm fill from ceiling
+const fill = new THREE.PointLight(0xffddb0, 0.06, 14);
+fill.position.set(0, RH - 0.12, 0);
+scene.add(fill);
+
+// ─── TEXTURES ────────────────────────────────────────────────────────────────
+function makeFloorTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const ctx = c.getContext('2d');
+  const plankH = 72;
+  const tones = ['#8c6b45', '#7b5c38', '#9c7652', '#856440', '#a07d56'];
+  for (let y = 0; y < 512; y += plankH) {
+    ctx.fillStyle = tones[Math.floor(y / plankH) % tones.length];
+    ctx.fillRect(0, y, 512, plankH);
+    // grain lines
+    ctx.save(); ctx.globalAlpha = 0.06;
+    for (let g = 0; g < 5; g++) {
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 0.6;
+      ctx.beginPath();
+      const gy = y + (g / 5) * plankH + (Math.random() - 0.5) * 6;
+      ctx.moveTo(0, gy); ctx.lineTo(512, gy + (Math.random() - 0.5) * 10);
+      ctx.stroke();
+    }
+    ctx.restore();
+    // gap
+    ctx.fillStyle = '#2e1c0a';
+    ctx.fillRect(0, y + plankH - 2, 512, 2);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(RW / 1.5, RD / 1.5);
+  return t;
+}
+
+const floorTex = makeFloorTex();
+
+// ─── MATERIALS ───────────────────────────────────────────────────────────────
+const wallMat  = new THREE.MeshLambertMaterial({ color: 0xe8e2f0 }); // soft lavender-white
+const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
+const ceilMat  = new THREE.MeshLambertMaterial({ color: 0xf0ecf8 }); // pale lilac ceiling
+const woodMat  = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
+const frameMat = new THREE.MeshLambertMaterial({ color: 0xf0ead6 });
+
+// ─── ROOM ────────────────────────────────────────────────────────────────────
+// Floor
+{
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(RW, RD), floorMat);
+  m.rotation.x = -Math.PI / 2;
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+// Ceiling
+{
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(RW, RD), ceilMat);
+  m.rotation.x = Math.PI / 2;
+  m.position.y = RH;
+  scene.add(m);
+}
+
+// Helper – add a plain rectangular wall plane
+function addWall(w, h, x, y, z, ry) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), wallMat);
+  m.position.set(x, y, z);
+  m.rotation.y = ry;
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+// Back wall (behind player, z = +RD/2, faces −z inward)
+addWall(RW, RH, 0, RH / 2,  RD / 2, Math.PI);
+// Left wall (solid)
+addWall(RD, RH, -RW / 2, RH / 2, 0, Math.PI / 2);
+// Right wall (x = +RW/2, faces −x inward)
+addWall(RD, RH,  RW / 2, RH / 2, 0, -Math.PI / 2);
+
+// ─── FRONT WALL WITH WINDOW HOLE ─────────────────────────────────────────────
+const WW = 1.9;   // window width
+const WH = 1.55;  // window height
+const WX = -WW / 2;  // window left edge (local x)
+const WY = 0.82;     // window bottom edge (local y)
+
+const frontShape = new THREE.Shape();
+frontShape.moveTo(-RW / 2, 0);
+frontShape.lineTo( RW / 2, 0);
+frontShape.lineTo( RW / 2, RH);
+frontShape.lineTo(-RW / 2, RH);
+frontShape.closePath();
+
+const winHole = new THREE.Path();
+winHole.moveTo(WX,      WY);
+winHole.lineTo(WX + WW, WY);
+winHole.lineTo(WX + WW, WY + WH);
+winHole.lineTo(WX,      WY + WH);
+winHole.closePath();
+frontShape.holes.push(winHole);
+
+{
+  const m = new THREE.Mesh(new THREE.ShapeGeometry(frontShape), wallMat);
+  m.position.z = -RD / 2;
+  // ShapeGeometry normal is +z by default → faces inward ✓
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+// ─── WINDOW FRAME ────────────────────────────────────────────────────────────
+const fT = 0.075;   // frame thickness
+const fD = 0.11;    // frame depth (z)
+const fZ = -RD / 2 + fD / 2;
+const wCX = 0;                  // window center x
+const wCY = WY + WH / 2;        // window center y
+
+function frameBox(w, h, d, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), frameMat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  scene.add(m);
+}
+// Outer frame
+frameBox(WW + fT * 2, fT, fD, wCX, WY + WH + fT / 2, fZ); // top
+frameBox(WW + fT * 2, fT, fD, wCX, WY - fT / 2,       fZ); // bottom
+frameBox(fT, WH,      fD, WX - fT / 2,      wCY, fZ); // left
+frameBox(fT, WH,      fD, WX + WW + fT / 2, wCY, fZ); // right
+// Window sill
+{
+  const m = new THREE.Mesh(new THREE.BoxGeometry(WW + fT * 2 + 0.22, 0.055, 0.20), frameMat);
+  m.position.set(wCX, WY - 0.012, -RD / 2 + 0.105);
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m);
+}
+
+// ─── LIGHT SHAFT ─────────────────────────────────────────────────────────────
+// Subtle translucent box – just a hint of volumetric light
+{
+  const g = new THREE.BoxGeometry(WW * 0.88, WH * 0.88, 5.5);
+  const mat = new THREE.MeshBasicMaterial({
+    color: 0xfff5d8,
+    transparent: true, opacity: 0.045,
+    depthWrite: false, side: THREE.BackSide,
+    blending: THREE.AdditiveBlending,
+  });
+  const m = new THREE.Mesh(g, mat);
+  m.position.set(wCX, wCY, -RD / 2 + 2.75);
+  scene.add(m);
+}
+
+
+// ─── DUST MOTES ──────────────────────────────────────────────────────────────
+const N_MOTES = 280;
+const motePos = new Float32Array(N_MOTES * 3);
+const moteOff = new Float32Array(N_MOTES);  // random phase offsets
+
+for (let i = 0; i < N_MOTES; i++) {
+  motePos[i * 3]     = (Math.random() - 0.5) * WW * 0.92;
+  motePos[i * 3 + 1] = WY + Math.random() * WH;
+  motePos[i * 3 + 2] = -RD / 2 + Math.random() * 5.0;
+  moteOff[i] = Math.random() * Math.PI * 2;
+}
+
+const moteGeo = new THREE.BufferGeometry();
+moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
+const moteMat = new THREE.PointsMaterial({
+  color: 0xffffcc,
+  size: 0.022, sizeAttenuation: true,
+  transparent: true, opacity: 0.55,
+  depthWrite: false,
+});
+scene.add(new THREE.Points(moteGeo, moteMat));
+
+// ─── FURNITURE ───────────────────────────────────────────────────────────────
+function box(w, h, d, mat, x, y, z, ry = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  if (ry) m.rotation.y = ry;
+  m.castShadow = true; m.receiveShadow = true;
+  scene.add(m); return m;
+}
+
+// ── Table
+const TX = -1.4, TZ = 0.5;
+box(1.45, 0.055, 0.78, woodMat, TX, 0.77, TZ);
+[[-0.62, -0.32], [0.62, -0.32], [-0.62, 0.32], [0.62, 0.32]].forEach(([lx, lz]) =>
+  box(0.055, 0.77, 0.055, woodMat, TX + lx, 0.385, TZ + lz)
+);
+
+// Small book on table
+box(0.22, 0.035, 0.16, new THREE.MeshLambertMaterial({ color: 0x8b2020 }), TX - 0.3, 0.80, TZ - 0.1, 0.15);
+
+// Mug on table (cylinder approximated as short box stack)
+{
+  const mugMat = new THREE.MeshLambertMaterial({ color: 0xd4cfc0 });
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.11, 12), mugMat);
+  m.position.set(TX + 0.35, 0.825, TZ + 0.05);
+  m.castShadow = true; scene.add(m);
+}
+
+// ── Chair
+const CX = -1.4, CZ = 1.35;
+box(0.52, 0.048, 0.52, woodMat, CX, 0.45, CZ);       // seat
+box(0.52, 0.60,  0.04, woodMat, CX, 0.78, CZ + 0.26); // backrest
+[[-0.21, -0.21], [0.21, -0.21], [-0.21, 0.21], [0.21, 0.21]].forEach(([lx, lz]) =>
+  box(0.042, 0.45, 0.042, woodMat, CX + lx, 0.225, CZ + lz)
+);
+
+// ── Bookshelf on back wall
+const shelfMat = new THREE.MeshLambertMaterial({ color: 0x6b4c2e });
+const SX = 1.2, SZ = RD / 2 - 0.13;
+box(2.1, 0.048, 0.24, shelfMat, SX, 1.72, SZ);          // shelf board
+box(0.048, 0.38, 0.24, shelfMat, SX - 1.0, 1.53, SZ);   // left bracket
+box(0.048, 0.38, 0.24, shelfMat, SX + 1.0, 1.53, SZ);   // right bracket
+
+// Books
+const bookColors = [0x8b2020, 0x1a4a8b, 0x2a6b2a, 0x8b6b20, 0x5a1a8b, 0x8b4a1a, 0x306060];
+let bx = SX - 0.92;
+bookColors.forEach(col => {
+  const bw = 0.09 + Math.random() * 0.07;
+  const bh = 0.19 + Math.random() * 0.08;
+  const m = new THREE.Mesh(
+    new THREE.BoxGeometry(bw, bh, 0.20),
+    new THREE.MeshLambertMaterial({ color: col })
+  );
+  m.position.set(bx + bw / 2, 1.724 + bh / 2, SZ);
+  m.rotation.y = (Math.random() - 0.5) * 0.14;
+  m.castShadow = true;
+  scene.add(m);
+  bx += bw + 0.008;
+});
+
+// ── Small plant near window (right side of sill)
+{
+  const potMat = new THREE.MeshLambertMaterial({ color: 0xb07040 });
+  const stemMat = new THREE.MeshLambertMaterial({ color: 0x3a7a2a });
+  const leafMat = new THREE.MeshLambertMaterial({ color: 0x4a9a35 });
+  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.10, 10), potMat);
+  pot.position.set(0.72, 0.88, -RD / 2 + 0.22);
+  pot.castShadow = true; scene.add(pot);
+  // Leaves (a few slightly random spheres)
+  [[0, 0.22, 0], [-0.1, 0.32, 0.04], [0.1, 0.30, -0.03], [0, 0.26, 0.12]].forEach(([ox, oy, oz]) => {
+    const r = 0.07 + Math.random() * 0.04;
+    const l = new THREE.Mesh(new THREE.SphereGeometry(r, 7, 7), leafMat);
+    l.position.set(0.72 + ox, 0.88 + oy, -RD / 2 + 0.22 + oz);
+    l.castShadow = true; scene.add(l);
+  });
+}
+
+// ─── EXTERIOR SCENE — dense forest wrapping all sides ────────────────────────
+
+// Dark forest floor — all around the cabin
+{
+  const m = new THREE.Mesh(
+    new THREE.PlaneGeometry(300, 300),
+    new THREE.MeshLambertMaterial({ color: 0x1e2a14 })
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(0, -0.01, 0);
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+// Pine tree — 4 stacked cones
+function addTree(x, z, scale = 1.0) {
+  const s = scale;
+  const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3a2010 });
+  const leafMat  = new THREE.MeshLambertMaterial({ color: 0x1e4018 });
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.10*s, 0.17*s, 2.0*s, 7), trunkMat);
+  trunk.position.set(x, 1.0*s, z);
+  trunk.castShadow = true; trunk.receiveShadow = true;
+  scene.add(trunk);
+  [
+    { r: 1.00*s, h: 2.2*s, y: 2.3*s },
+    { r: 0.76*s, h: 2.0*s, y: 3.7*s },
+    { r: 0.52*s, h: 1.8*s, y: 5.0*s },
+    { r: 0.30*s, h: 1.5*s, y: 6.1*s },
+  ].forEach(({ r, h, y }) => {
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(r, h, 7), leafMat);
+    cone.position.set(x, y, z);
+    cone.castShadow = true;
+    scene.add(cone);
+  });
+}
+
+// Small shrub — felt at the base of trees
+function addShrub(x, z) {
+  const mat = new THREE.MeshLambertMaterial({ color: 0x2a4a1a });
+  [0, 0.55, -0.45, 0.3].forEach((ox, i) => {
+    const oz = [0, 0.2, 0.4, -0.3][i];
+    const r  = [0.35, 0.28, 0.22, 0.25][i];
+    const m = new THREE.Mesh(new THREE.SphereGeometry(r, 6, 5), mat);
+    m.position.set(x + ox, r * 0.7, z + oz);
+    m.scale.y = 0.65;
+    scene.add(m);
+  });
+}
+
+// ── FRONT (z < -RD/2) ── towering trees straight ahead
+addTree(  0.3, -RD/2 -  2.5, 3.8);
+addTree( -1.6, -RD/2 -  3.2, 3.5);
+addTree(  2.8, -RD/2 -  3.8, 4.0);
+addTree( -3.4, -RD/2 -  4.5, 3.2);
+addTree(  1.0, -RD/2 -  8,   2.5);
+addTree( -2.0, -RD/2 -  9,   2.3);
+addTree(  5.0, -RD/2 - 10,   2.7);
+addTree( -5.0, -RD/2 - 11,   2.4);
+addTree(  0.0, -RD/2 - 15,   2.0);
+addTree(  4.0, -RD/2 - 20,   1.8);
+addTree( -4.0, -RD/2 - 22,   1.7);
+addShrub(  1.5, -RD/2 - 2.0);
+addShrub( -1.0, -RD/2 - 2.8);
+addShrub(  3.5, -RD/2 - 3.5);
+
+// ── LEFT SIDE (x < -RW/2) ── trees pressing against left wall & window
+addTree( -RW/2 - 1.5, -1.0, 3.6);  // right in front of left window
+addTree( -RW/2 - 2.5,  1.5, 3.2);
+addTree( -RW/2 - 1.8, -3.0, 3.0);
+addTree( -RW/2 - 3.5,  3.0, 2.8);
+addTree( -RW/2 - 2.0, -5.5, 2.5);
+addTree( -RW/2 - 4.0,  5.5, 2.3);
+addTree( -RW/2 - 5.5,  0.0, 2.6);
+addShrub(-RW/2 - 1.0,  0.0);
+addShrub(-RW/2 - 2.0, -2.0);
+
+// ── RIGHT SIDE (x > +RW/2)
+addTree(  RW/2 + 1.8, -1.0, 3.4);
+addTree(  RW/2 + 2.5,  1.5, 3.0);
+addTree(  RW/2 + 1.5, -3.5, 3.2);
+addTree(  RW/2 + 3.5,  3.5, 2.7);
+addTree(  RW/2 + 5.0, -0.5, 2.5);
+
+// ── BEHIND (z > +RD/2) ── forest closes in from the back
+addTree(  0.5, RD/2 + 2.0, 3.5);
+addTree( -2.0, RD/2 + 2.5, 3.0);
+addTree(  2.5, RD/2 + 3.0, 3.2);
+addTree( -0.5, RD/2 + 5.5, 2.5);
+addTree(  4.0, RD/2 + 4.0, 2.8);
+addShrub( 1.0, RD/2 + 1.5);
+addShrub(-1.5, RD/2 + 2.0);
+
+// ─── AMBIENT MUSIC (Web Audio API, procedural) ───────────────────────────────
+let audioCtx = null;
+let masterGain = null;
+
+function startMusic() {
+  if (audioCtx) { audioCtx.resume(); return; }
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Master output with gentle overall volume
+  masterGain = audioCtx.createGain();
+  masterGain.gain.setValueAtTime(0, audioCtx.currentTime);
+  masterGain.gain.linearRampToValueAtTime(0.22, audioCtx.currentTime + 4); // fade in
+  masterGain.connect(audioCtx.destination);
+
+  // Two-tap feedback delay → spacious reverb feel
+  const dL = audioCtx.createDelay(4);  dL.delayTime.value = 1.18;
+  const dR = audioCtx.createDelay(4);  dR.delayTime.value = 0.89;
+  const fbL = audioCtx.createGain();   fbL.gain.value = 0.36;
+  const fbR = audioCtx.createGain();   fbR.gain.value = 0.33;
+  const revGain = audioCtx.createGain(); revGain.gain.value = 0.42;
+  dL.connect(fbL); fbL.connect(dL); dL.connect(revGain);
+  dR.connect(fbR); fbR.connect(dR); dR.connect(revGain);
+  revGain.connect(masterGain);
+
+  // Play one note: two detuned sines + ADSR envelope
+  function playNote(freq, vol, attack, hold, release, when) {
+    const o1 = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
+    const env = audioCtx.createGain();
+    o1.type = o2.type = 'sine';
+    o1.frequency.value = freq;
+    o2.frequency.value = freq * 1.0038; // gentle chorus detune
+    env.gain.setValueAtTime(0.0001, when);
+    env.gain.linearRampToValueAtTime(vol,        when + attack);
+    env.gain.linearRampToValueAtTime(vol * 0.72, when + attack + hold);
+    env.gain.exponentialRampToValueAtTime(0.0001, when + attack + hold + release);
+    o1.connect(env); o2.connect(env);
+    env.connect(masterGain);
+    env.connect(dL); env.connect(dR); // send to reverb
+    const end = when + attack + hold + release + 0.1;
+    o1.start(when); o2.start(when);
+    o1.stop(end);   o2.stop(end);
+  }
+
+  // C major pentatonic (C D E G A) — no tension intervals
+  const C3=130.81, D3=146.83, E3=164.81, G3=196.00, A3=220.00;
+  const C4=261.63, D4=293.66, E4=329.63, G4=392.00, A4=440.00;
+  const C5=523.25, E5=659.25, G5=783.99;
+
+  // ── Drone: soft low C, plays forever
+  {
+    const o = audioCtx.createOscillator();
+    const o2 = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = o2.type = 'sine';
+    o.frequency.value = 65.41;       // C2
+    o2.frequency.value = 65.41 * 1.002;
+    g.gain.setValueAtTime(0, audioCtx.currentTime);
+    g.gain.linearRampToValueAtTime(0.055, audioCtx.currentTime + 5);
+    o.connect(g); o2.connect(g);
+    g.connect(masterGain);
+    o.start(); o2.start();
+  }
+
+  // ── Pad: slow C-major chord arpeggio, cycles every ~14 s
+  const padChord = [C3, E3, G3, C4, E4];
+  function schedulePad() {
+    const t = audioCtx.currentTime + 0.1;
+    padChord.forEach((freq, i) => playNote(freq, 0.07, 2.2, 4.5, 3.5, t + i * 1.1));
+    setTimeout(schedulePad, 13_500);
+  }
+
+  // ── Melody: sparse random pentatonic notes
+  const melodyPool = [G3, A3, C4, D4, E4, G4, A4, C5, E5, G5];
+  function scheduleMelody() {
+    const freq = melodyPool[Math.floor(Math.random() * melodyPool.length)];
+    playNote(freq, 0.048, 1.4, 2.0, 4.2, audioCtx.currentTime + 0.05);
+    setTimeout(scheduleMelody, Math.random() * 5500 + 3000); // every 3–8.5 s
+  }
+
+  // Stagger starts so it doesn't all hit at once
+  setTimeout(schedulePad,    200);
+  setTimeout(scheduleMelody, 3500);
+}
+
+function pauseMusic() { audioCtx?.suspend(); }
+
+// ─── CONTROLS ────────────────────────────────────────────────────────────────
+const isMobile = navigator.maxTouchPoints > 0;
+camera.rotation.order = 'YXZ';
+
+const overlay   = document.getElementById('overlay');
+const crosshair = document.getElementById('crosshair');
+const jBase     = document.getElementById('joystick-base');
+const jKnob     = document.getElementById('joystick-knob');
+
+// Update hint text to match platform
+overlay.querySelector('.hint').textContent = isMobile
+  ? 'Left side · move    |    Right side · look'
+  : 'WASD · move    |    Mouse · look    |    ESC · pause';
+
+// ── DESKTOP ──────────────────────────────────────────────────────────────────
+let controls = null;
+const keys = {};
+
+if (!isMobile) {
+  controls = new PointerLockControls(camera, renderer.domElement);
+  overlay.addEventListener('click', () => controls.lock());
+  controls.addEventListener('lock', () => {
+    overlay.style.display = 'none';
+    crosshair.style.display = 'block';
+    startMusic();
+  });
+  controls.addEventListener('unlock', () => {
+    overlay.style.display = 'flex';
+    crosshair.style.display = 'none';
+    pauseMusic();
+  });
+  document.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) e.preventDefault();
+  });
+  document.addEventListener('keyup', e => { keys[e.code] = false; });
+}
+
+// ── MOBILE ───────────────────────────────────────────────────────────────────
+let mobileActive = false;
+let mobilePitch = 0, mobileYaw = 0;
+let lookId = null, moveId = null;
+let lookLast = { x: 0, y: 0 };
+let joyCentre = { x: 0, y: 0 };
+let joyDelta  = { x: 0, y: 0 };
+const MAX_JOY = 52;
+
+if (isMobile) {
+  overlay.addEventListener('click', () => {
+    overlay.style.display = 'none';
+    mobileActive = true;
+    startMusic();
+  });
+
+  const cvs = renderer.domElement;
+
+  cvs.addEventListener('touchstart', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.clientX < window.innerWidth / 2 && moveId === null) {
+        moveId = t.identifier;
+        joyCentre = { x: t.clientX, y: t.clientY };
+        joyDelta  = { x: 0, y: 0 };
+        jBase.style.left = t.clientX + 'px';
+        jBase.style.top  = t.clientY + 'px';
+        jBase.style.display = 'block';
+      } else if (t.clientX >= window.innerWidth / 2 && lookId === null) {
+        lookId   = t.identifier;
+        lookLast = { x: t.clientX, y: t.clientY };
+      }
+    }
+  }, { passive: false });
+
+  cvs.addEventListener('touchmove', e => {
+    e.preventDefault();
+    for (const t of e.changedTouches) {
+      if (t.identifier === lookId) {
+        mobileYaw   -= (t.clientX - lookLast.x) * 0.004;
+        mobilePitch -= (t.clientY - lookLast.y) * 0.004;
+        mobilePitch  = THREE.MathUtils.clamp(mobilePitch, -Math.PI * 0.42, Math.PI * 0.42);
+        lookLast = { x: t.clientX, y: t.clientY };
+      }
+      if (t.identifier === moveId) {
+        joyDelta = { x: t.clientX - joyCentre.x, y: t.clientY - joyCentre.y };
+        const len = Math.hypot(joyDelta.x, joyDelta.y);
+        const c   = Math.min(len, MAX_JOY);
+        const kx  = len > 0 ? joyDelta.x / len * c : 0;
+        const ky  = len > 0 ? joyDelta.y / len * c : 0;
+        jKnob.style.transform = `translate(calc(-50% + ${kx}px), calc(-50% + ${ky}px))`;
+      }
+    }
+  }, { passive: false });
+
+  cvs.addEventListener('touchend', e => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === lookId) lookId = null;
+      if (t.identifier === moveId) {
+        moveId = null;
+        joyDelta = { x: 0, y: 0 };
+        jBase.style.display = 'none';
+        jKnob.style.transform = 'translate(-50%, -50%)';
+      }
+    }
+  });
+}
+
+// ─── ANIMATE ─────────────────────────────────────────────────────────────────
+const clock = new THREE.Clock();
+const SPEED  = 3.6;
+const MARGIN = 0.38;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  const t  = clock.elapsedTime;
+
+  // ── Player movement
+  if (!isMobile && controls?.isLocked) {
+    if (keys['KeyW'] || keys['ArrowUp'])    controls.moveForward( SPEED * dt);
+    if (keys['KeyS'] || keys['ArrowDown'])  controls.moveForward(-SPEED * dt);
+    if (keys['KeyA'] || keys['ArrowLeft'])  controls.moveRight(  -SPEED * dt);
+    if (keys['KeyD'] || keys['ArrowRight']) controls.moveRight(   SPEED * dt);
+  }
+  if (isMobile && mobileActive) {
+    camera.rotation.y = mobileYaw;
+    camera.rotation.x = mobilePitch;
+    const len = Math.hypot(joyDelta.x, joyDelta.y);
+    if (len > 6) {
+      const f   = Math.min(len, MAX_JOY) / MAX_JOY;
+      const nx  = joyDelta.x / len * f;
+      const ny  = joyDelta.y / len * f;
+      const fwd = new THREE.Vector3(0, 0, -1).applyEuler(new THREE.Euler(0, mobileYaw, 0));
+      const rgt = new THREE.Vector3(1, 0,  0).applyEuler(new THREE.Euler(0, mobileYaw, 0));
+      camera.position.addScaledVector(fwd, -ny * SPEED * dt);
+      camera.position.addScaledVector(rgt,  nx * SPEED * dt);
+    }
+  }
+  if (!isMobile && controls?.isLocked || isMobile && mobileActive) {
+    camera.position.x = THREE.MathUtils.clamp(camera.position.x, -RW/2 + MARGIN, RW/2 - MARGIN);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z, -RD/2 + MARGIN, RD/2 - MARGIN);
+    camera.position.y = 1.62;
+  }
+
+  // ── Animate dust motes (gentle float)
+  const pos = moteGeo.attributes.position;
+  for (let i = 0; i < N_MOTES; i++) {
+    const ph = moteOff[i];
+    pos.array[i * 3]     += Math.sin(t * 0.4 + ph)       * 0.00045;
+    pos.array[i * 3 + 1] += 0.0028 + Math.sin(t * 0.25 + ph * 1.3) * 0.0009;
+    pos.array[i * 3 + 2] += Math.sin(t * 0.3 + ph * 0.7) * 0.00025;
+    // Wrap vertically
+    if (pos.array[i * 3 + 1] > WY + WH + 0.15) pos.array[i * 3 + 1] = WY - 0.05;
+  }
+  pos.needsUpdate = true;
+
+  // Gentle dreamy camera breathe — always present, just barely perceptible
+  camera.position.y = 1.62 + Math.sin(t * 0.4) * 0.012;
+  camera.position.x += Math.sin(t * 0.22) * 0.0002;
+
+  composer.render();
+}
+animate();
+
+// ─── RESIZE ──────────────────────────────────────────────────────────────────
+window.addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  composer.setSize(window.innerWidth, window.innerHeight);
+  bloomPass.resolution.set(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
