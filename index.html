@@ -4,6 +4,63 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>breathe</title>
+  <script>
+    // Generate cat favicon — simple silhouette, brush stroke feel
+    const fc = document.createElement('canvas');
+    fc.width = fc.height = 64;
+    const fx = fc.getContext('2d');
+
+    fx.strokeStyle = '#000';
+    fx.lineCap = 'round';
+    fx.lineJoin = 'round';
+
+    // Body — fat vertical stroke, tapers at top
+    fx.lineWidth = 20;
+    fx.beginPath();
+    fx.moveTo(30, 52); fx.lineTo(30, 32);
+    fx.stroke();
+
+    // Chest/belly — wide horizontal to fill out lower body
+    fx.lineWidth = 22;
+    fx.beginPath();
+    fx.moveTo(22, 50); fx.lineTo(38, 50);
+    fx.stroke();
+
+    // Head — large round dot
+    fx.lineWidth = 21;
+    fx.beginPath();
+    fx.moveTo(30, 16); fx.lineTo(30, 17);
+    fx.stroke();
+
+    // Neck
+    fx.lineWidth = 9;
+    fx.beginPath();
+    fx.moveTo(30, 26); fx.lineTo(30, 30);
+    fx.stroke();
+
+    // Left ear — thin sharp stroke
+    fx.lineWidth = 3.5;
+    fx.beginPath();
+    fx.moveTo(23, 11); fx.lineTo(19, 2); fx.lineTo(28, 9);
+    fx.stroke();
+
+    // Right ear
+    fx.beginPath();
+    fx.moveTo(37, 11); fx.lineTo(41, 2); fx.lineTo(32, 9);
+    fx.stroke();
+
+    // Tail — sweeping thin curve
+    fx.lineWidth = 5;
+    fx.beginPath();
+    fx.moveTo(37, 56);
+    fx.bezierCurveTo(52, 52, 60, 36, 52, 22);
+    fx.bezierCurveTo(48, 14, 42, 16, 44, 22);
+    fx.stroke();
+
+    const link = document.createElement('link');
+    link.rel = 'icon'; link.href = fc.toDataURL();
+    document.head.appendChild(link);
+  </script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #9ecfee; font-family: system-ui, sans-serif; }
