@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Breathe</title>
+  <title>breathe</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { overflow: hidden; background: #9ecfee; font-family: system-ui, sans-serif; }
@@ -64,9 +64,9 @@
 <body>
 
 <div id="overlay">
-  <h1>Breathe</h1>
-  <p class="sub">Click to enter</p>
-  <p class="hint">WASD &nbsp;·&nbsp; move &nbsp;&nbsp;|&nbsp;&nbsp; Mouse &nbsp;·&nbsp; look &nbsp;&nbsp;|&nbsp;&nbsp; ESC &nbsp;·&nbsp; pause</p>
+  <h1>breathe</h1>
+  <p class="sub">click to enter</p>
+  <p class="hint">wasd &nbsp;·&nbsp; move &nbsp;&nbsp;|&nbsp;&nbsp; mouse &nbsp;·&nbsp; look &nbsp;&nbsp;|&nbsp;&nbsp; esc &nbsp;·&nbsp; pause</p>
 </div>
 <div id="crosshair"></div>
 <div id="vignette"></div>
@@ -131,7 +131,7 @@ const RD = 6.5;   // depth  (z)
 scene.add(new THREE.AmbientLight(0xc8d8b8, 0.42)); // cool green-filtered forest light
 
 // Sunlight through window – slightly angled cool daylight
-const sun = new THREE.DirectionalLight(0xd8e8c8, 2.0); // dappled canopy light
+const sun = new THREE.DirectionalLight(0xd8e8c8, 1.6); // dappled canopy light
 sun.position.set(-1.8, 3.5, -RD / 2 - 5);
 sun.target.position.set(1.2, 0.2, 1.0);
 sun.castShadow = true;
@@ -144,10 +144,6 @@ sun.shadow.bias = -0.002;
 scene.add(sun);
 scene.add(sun.target);
 
-// Soft warm fill from ceiling
-const fill = new THREE.PointLight(0xffddb0, 0.06, 14);
-fill.position.set(0, RH - 0.12, 0);
-scene.add(fill);
 
 // ─── TEXTURES ────────────────────────────────────────────────────────────────
 function makeFloorTex() {
@@ -455,16 +451,6 @@ addShrub(  1.5, -RD/2 - 2.0);
 addShrub( -1.0, -RD/2 - 2.8);
 addShrub(  3.5, -RD/2 - 3.5);
 
-// ── LEFT SIDE (x < -RW/2) ── trees pressing against left wall & window
-addTree( -RW/2 - 1.5, -1.0, 3.6);  // right in front of left window
-addTree( -RW/2 - 2.5,  1.5, 3.2);
-addTree( -RW/2 - 1.8, -3.0, 3.0);
-addTree( -RW/2 - 3.5,  3.0, 2.8);
-addTree( -RW/2 - 2.0, -5.5, 2.5);
-addTree( -RW/2 - 4.0,  5.5, 2.3);
-addTree( -RW/2 - 5.5,  0.0, 2.6);
-addShrub(-RW/2 - 1.0,  0.0);
-addShrub(-RW/2 - 2.0, -2.0);
 
 // ── RIGHT SIDE (x > +RW/2)
 addTree(  RW/2 + 1.8, -1.0, 3.4);
@@ -580,8 +566,8 @@ const jKnob     = document.getElementById('joystick-knob');
 
 // Update hint text to match platform
 overlay.querySelector('.hint').textContent = isMobile
-  ? 'Left side · move    |    Right side · look'
-  : 'WASD · move    |    Mouse · look    |    ESC · pause';
+  ? 'left side · move    |    right side · look'
+  : 'wasd · move    |    mouse · look    |    esc · pause';
 
 // ── DESKTOP ──────────────────────────────────────────────────────────────────
 let controls = null;
@@ -589,16 +575,14 @@ const keys = {};
 
 if (!isMobile) {
   controls = new PointerLockControls(camera, renderer.domElement);
-  overlay.addEventListener('click', () => controls.lock());
+  overlay.addEventListener('click', () => { startMusic(); controls.lock(); });
   controls.addEventListener('lock', () => {
     overlay.style.display = 'none';
     crosshair.style.display = 'block';
-    startMusic();
   });
   controls.addEventListener('unlock', () => {
     overlay.style.display = 'flex';
     crosshair.style.display = 'none';
-    pauseMusic();
   });
   document.addEventListener('keydown', e => {
     keys[e.code] = true;
