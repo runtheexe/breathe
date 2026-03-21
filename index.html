@@ -88,21 +88,22 @@ import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
+import { GLTFLoader }      from 'three/addons/loaders/GLTFLoader.js';
 
 // ─── RENDERER ────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.shadowMap.type = THREE.PCFShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.82;
 document.body.appendChild(renderer.domElement);
 
 // ─── SCENE ───────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x5a7a60); // forest canopy, lighter
-scene.fog = new THREE.Fog(0x4a6a50, 6, 55);   // close forest mist
+scene.background = new THREE.Color(0x7a9e80); // forest canopy, lighter
+scene.fog = new THREE.Fog(0x6a8e70, 6, 55);   // close forest mist
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.62, 2.2);
@@ -128,18 +129,18 @@ const RD = 6.5;   // depth  (z)
 
 // ─── LIGHTING ────────────────────────────────────────────────────────────────
 // Warm indoor ambient
-scene.add(new THREE.AmbientLight(0xc8d8b8, 0.42)); // cool green-filtered forest light
+scene.add(new THREE.AmbientLight(0xc8d8b8, 0.38)); // cool green-filtered forest light
 
 // Sunlight through window – slightly angled cool daylight
-const sun = new THREE.DirectionalLight(0xd8e8c8, 1.6); // dappled canopy light
+const sun = new THREE.DirectionalLight(0xd8e8c8, 0.5); // dappled canopy light
 sun.position.set(-1.8, 3.5, -RD / 2 - 5);
-sun.target.position.set(1.2, 0.2, 1.0);
+sun.target.position.set(0, 0.5, RD / 2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far  = 22;
-sun.shadow.camera.left = -6;  sun.shadow.camera.right  = 6;
-sun.shadow.camera.top  =  5;  sun.shadow.camera.bottom = -3;
+sun.shadow.camera.far  = 32;
+sun.shadow.camera.left = -8;  sun.shadow.camera.right  = 8;
+sun.shadow.camera.top  =  8;  sun.shadow.camera.bottom = -4;
 sun.shadow.bias = -0.002;
 scene.add(sun);
 scene.add(sun.target);
@@ -275,7 +276,7 @@ frameBox(fT, WH,      fD, WX + WW + fT / 2, wCY, fZ); // right
 // ─── LIGHT SHAFT ─────────────────────────────────────────────────────────────
 // Subtle translucent box – just a hint of volumetric light
 {
-  const g = new THREE.BoxGeometry(WW * 0.88, WH * 0.88, 5.5);
+  const g = new THREE.BoxGeometry(WW - 0.01, WH - 0.01, RD);
   const mat = new THREE.MeshBasicMaterial({
     color: 0xfff5d8,
     transparent: true, opacity: 0.045,
@@ -283,7 +284,7 @@ frameBox(fT, WH,      fD, WX + WW + fT / 2, wCY, fZ); // right
     blending: THREE.AdditiveBlending,
   });
   const m = new THREE.Mesh(g, mat);
-  m.position.set(wCX, wCY, -RD / 2 + 2.75);
+  m.position.set(wCX, wCY, -0.01);
   scene.add(m);
 }
 
@@ -326,24 +327,38 @@ box(1.45, 0.055, 0.78, woodMat, TX, 0.77, TZ);
   box(0.055, 0.77, 0.055, woodMat, TX + lx, 0.385, TZ + lz)
 );
 
-// Small book on table
-box(0.22, 0.035, 0.16, new THREE.MeshLambertMaterial({ color: 0x8b2020 }), TX - 0.3, 0.80, TZ - 0.1, 0.15);
-
-// Mug on table (cylinder approximated as short box stack)
-{
-  const mugMat = new THREE.MeshLambertMaterial({ color: 0xd4cfc0 });
-  const m = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.11, 12), mugMat);
-  m.position.set(TX + 0.35, 0.825, TZ + 0.05);
-  m.castShadow = true; scene.add(m);
-}
-
 // ── Chair
-const CX = -1.4, CZ = 1.35;
+const CX = -1.4, CZ = 1.1;
 box(0.52, 0.048, 0.52, woodMat, CX, 0.45, CZ);       // seat
 box(0.52, 0.60,  0.04, woodMat, CX, 0.78, CZ + 0.26); // backrest
 [[-0.21, -0.21], [0.21, -0.21], [-0.21, 0.21], [0.21, 0.21]].forEach(([lx, lz]) =>
   box(0.042, 0.45, 0.042, woodMat, CX + lx, 0.225, CZ + lz)
 );
+
+// ── Cat — GLB model on the table
+new GLTFLoader().load('assets/cat.glb', gltf => {
+  const cat = gltf.scene;
+
+  // Fit the model to roughly 0.35 units tall
+  const catBox = new THREE.Box3().setFromObject(cat);
+  const size = catBox.getSize(new THREE.Vector3());
+  const scale = 0.35 / Math.max(size.x, size.y, size.z);
+  cat.scale.setScalar(scale);
+  cat.rotation.x = -Math.PI / 2;
+  cat.rotation.z = Math.PI - Math.PI / 8;
+
+  // Sit it on the table top
+  catBox.setFromObject(cat);
+  cat.position.set(TX, 0.798 - catBox.min.y, TZ);
+
+  cat.traverse(n => {
+    if (n.isMesh) {
+      n.castShadow = true; n.receiveShadow = true;
+      n.material = new THREE.MeshLambertMaterial({ color: 0xb8956e }); // warm tan
+    }
+  });
+  scene.add(cat);
+});
 
 // ── Bookshelf on back wall
 const shelfMat = new THREE.MeshLambertMaterial({ color: 0x6b4c2e });
@@ -369,22 +384,6 @@ bookColors.forEach(col => {
   bx += bw + 0.008;
 });
 
-// ── Small plant near window (right side of sill)
-{
-  const potMat = new THREE.MeshLambertMaterial({ color: 0xb07040 });
-  const stemMat = new THREE.MeshLambertMaterial({ color: 0x3a7a2a });
-  const leafMat = new THREE.MeshLambertMaterial({ color: 0x4a9a35 });
-  const pot = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.055, 0.10, 10), potMat);
-  pot.position.set(0.72, 0.88, -RD / 2 + 0.22);
-  pot.castShadow = true; scene.add(pot);
-  // Leaves (a few slightly random spheres)
-  [[0, 0.22, 0], [-0.1, 0.32, 0.04], [0.1, 0.30, -0.03], [0, 0.26, 0.12]].forEach(([ox, oy, oz]) => {
-    const r = 0.07 + Math.random() * 0.04;
-    const l = new THREE.Mesh(new THREE.SphereGeometry(r, 7, 7), leafMat);
-    l.position.set(0.72 + ox, 0.88 + oy, -RD / 2 + 0.22 + oz);
-    l.castShadow = true; scene.add(l);
-  });
-}
 
 // ─── EXTERIOR SCENE — dense forest wrapping all sides ────────────────────────
 
@@ -471,6 +470,7 @@ addShrub(-1.5, RD/2 + 2.0);
 // ─── AMBIENT MUSIC (Web Audio API, procedural) ───────────────────────────────
 let audioCtx = null;
 let masterGain = null;
+let purrGain = null;
 
 function startMusic() {
   if (audioCtx) { audioCtx.resume(); return; }
@@ -551,6 +551,67 @@ function startMusic() {
   // Stagger starts so it doesn't all hit at once
   setTimeout(schedulePad,    200);
   setTimeout(scheduleMelody, 3500);
+
+  // ── Clock tick/tock — 60 BPM, lookahead scheduled for precision
+  const tickGain = audioCtx.createGain();
+  tickGain.gain.value = 0.038;
+  tickGain.connect(masterGain);
+
+  function fireTick(when, isTock) {
+    const osc = audioCtx.createOscillator();
+    const env = audioCtx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = isTock ? 1800 : 2400; // tock lower, tick higher
+    env.gain.setValueAtTime(0, when);
+    env.gain.linearRampToValueAtTime(1.0, when + 0.0005);
+    env.gain.exponentialRampToValueAtTime(0.0001, when + 0.005);
+    osc.connect(env);
+    env.connect(tickGain);
+    osc.start(when);
+    osc.stop(when + 0.008);
+  }
+
+  let nextTick = audioCtx.currentTime + 1.0;
+  let tock = false;
+  function scheduleTicks() {
+    while (nextTick < audioCtx.currentTime + 0.5) {
+      fireTick(nextTick, tock);
+      nextTick += 1.0;
+      tock = !tock;
+    }
+    setTimeout(scheduleTicks, 200);
+  }
+  scheduleTicks();
+
+  // ── Purr: C2 sawtooth, 25 Hz amplitude modulation, proximity-driven
+  const purrOsc  = audioCtx.createOscillator();
+  const purrOsc2 = audioCtx.createOscillator();
+  const purrLFO  = audioCtx.createOscillator();
+  const purrLFOGain = audioCtx.createGain();
+  const purrMod  = audioCtx.createGain();
+  const purrFilt = audioCtx.createBiquadFilter();
+  purrGain = audioCtx.createGain();
+
+  purrOsc.type  = purrOsc2.type = 'sawtooth';
+  purrOsc.frequency.value  = 65.41;          // C2 — same as drone
+  purrOsc2.frequency.value = 65.41 * 1.012;  // subtle chorus
+  purrLFO.frequency.value  = 25;             // purr rhythm (~cat range)
+  purrLFOGain.gain.value   = 0.45;           // depth of modulation
+  purrMod.gain.value       = 0.5;            // DC offset so gain stays positive
+  purrFilt.type = 'lowpass';
+  purrFilt.frequency.value = 200;            // keep only the warm rumble
+  purrFilt.Q.value = 0.7;
+  purrGain.gain.value = 0;                   // starts silent, driven by proximity
+
+  purrOsc.connect(purrFilt);
+  purrOsc2.connect(purrFilt);
+  purrFilt.connect(purrMod);
+  purrLFO.connect(purrLFOGain);
+  purrLFOGain.connect(purrMod.gain);         // LFO modulates amplitude
+  purrMod.connect(purrGain);
+  purrGain.connect(masterGain);
+
+  purrOsc.start(); purrOsc2.start(); purrLFO.start();
 }
 
 function pauseMusic() { audioCtx?.suspend(); }
@@ -579,10 +640,12 @@ if (!isMobile) {
   controls.addEventListener('lock', () => {
     overlay.style.display = 'none';
     crosshair.style.display = 'block';
+    audioCtx?.resume();
   });
   controls.addEventListener('unlock', () => {
     overlay.style.display = 'flex';
     crosshair.style.display = 'none';
+    pauseMusic();
   });
   document.addEventListener('keydown', e => {
     keys[e.code] = true;
@@ -703,14 +766,26 @@ function animate() {
     pos.array[i * 3]     += Math.sin(t * 0.4 + ph)       * 0.00045;
     pos.array[i * 3 + 1] += 0.0028 + Math.sin(t * 0.25 + ph * 1.3) * 0.0009;
     pos.array[i * 3 + 2] += Math.sin(t * 0.3 + ph * 0.7) * 0.00025;
-    // Wrap vertically
+    // Wrap: keep motes inside the light shaft volume
+    const hw = WW * 0.46, hh = WH * 0.46;
+    if (pos.array[i * 3]     >  hw) pos.array[i * 3]     = -hw;
+    if (pos.array[i * 3]     < -hw) pos.array[i * 3]     =  hw;
     if (pos.array[i * 3 + 1] > WY + WH + 0.15) pos.array[i * 3 + 1] = WY - 0.05;
+    if (pos.array[i * 3 + 2] > -RD / 2 + 5.1)  pos.array[i * 3 + 2] = -RD / 2 + 0.05;
   }
   pos.needsUpdate = true;
 
+  // ── Purr proximity
+  if (purrGain && audioCtx) {
+    const dx = camera.position.x - TX;
+    const dz = camera.position.z - TZ;
+    const dist = Math.sqrt(dx * dx + dz * dz);
+    const vol = THREE.MathUtils.clamp(1 - dist / 3.0, 0, 1) * 0.7;
+    purrGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.6);
+  }
+
   // Gentle dreamy camera breathe — always present, just barely perceptible
   camera.position.y = 1.62 + Math.sin(t * 0.4) * 0.012;
-  camera.position.x += Math.sin(t * 0.22) * 0.0002;
 
   composer.render();
 }
