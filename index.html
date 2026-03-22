@@ -126,8 +126,8 @@ document.body.appendChild(renderer.domElement);
 
 // ─── SCENE ───────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x7a9e80); // forest canopy, lighter
-scene.fog = new THREE.Fog(0x6a8e70, 6, 55);   // close forest mist
+scene.background = new THREE.Color(0x8ec8a0); // spring sky
+scene.fog = new THREE.Fog(0x7ab890, 6, 55);   // forest mist
 
 const camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.05, 50);
 camera.position.set(0, 1.62, 2.2);
@@ -137,9 +137,9 @@ const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
-  0.75,  // strength
+  0.90,  // strength
   0.50,  // radius
-  0.82   // threshold — raised so only bright edges/lights bloom, not the whole sky
+  0.75   // threshold — window opening and bright sky get a gentle glow
 );
 composer.addPass(bloomPass);
 composer.addPass(new OutputPass());
@@ -719,25 +719,25 @@ const SEASON_CYCLE = 54; // 4 × 13.5s pad cycle — one season per pad cycle
 // [spring, summer, autumn, winter]
 const SEASONS = [
   { name: 'spring',
-    bg: 0xb8d4bc, fog: 0xa8c4ac,
-    leaf: 0x5a9a4a, shrub: 0x4a8a3a, ground: 0x2a3a18,
-    ambCol: 0xe0d8b8, ambInt: 0.50,
-    sunCol: 0xffe8c8, sunInt: 0.90 },
+    bg: 0x8ec8a0, fog: 0x7ab890,
+    leaf: 0x72c85a, shrub: 0x58b048, ground: 0x2a3a18,
+    ambCol: 0xe8dcc0, ambInt: 0.52,
+    sunCol: 0xffe8c8, sunInt: 1.10 },
   { name: 'summer',
-    bg: 0xb0d0b8, fog: 0xa0c0a8,
-    leaf: 0x2a5822, shrub: 0x366628, ground: 0x1e2a14,
-    ambCol: 0xd8c8a0, ambInt: 0.54,
-    sunCol: 0xf8e0a8, sunInt: 1.05 },
+    bg: 0x68b882, fog: 0x58a872,
+    leaf: 0x2a7020, shrub: 0x388030, ground: 0x1e2a14,
+    ambCol: 0xe0d0a0, ambInt: 0.56,
+    sunCol: 0xfce8a0, sunInt: 1.30 },
   { name: 'autumn',
-    bg: 0xc09050, fog: 0xb08040,
-    leaf: 0xb05810, shrub: 0x7a4010, ground: 0x3a2810,
-    ambCol: 0xf0c880, ambInt: 0.54,
-    sunCol: 0xffcc60, sunInt: 1.0 },
+    bg: 0xd88030, fog: 0xc87020,
+    leaf: 0xd06010, shrub: 0x9a4010, ground: 0x3a2810,
+    ambCol: 0xf8d080, ambInt: 0.56,
+    sunCol: 0xffb830, sunInt: 1.20 },
   { name: 'winter',
-    bg: 0xd0e4f0, fog: 0xc0d4e0,
+    bg: 0xb8d8f0, fog: 0xa8c8e0,
     leaf: 0x3a3a3a, shrub: 0x303030, ground: 0xd0d8d0,
-    ambCol: 0xc8d0e0, ambInt: 0.40,
-    sunCol: 0xd8ecff, sunInt: 0.55 },
+    ambCol: 0xd0dcea, ambInt: 0.42,
+    sunCol: 0xe8f4ff, sunInt: 0.72 },
 ];
 
 // Pre-convert to THREE.Color for lerping
