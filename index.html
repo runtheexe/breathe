@@ -1029,6 +1029,7 @@ function startMusic() {
 
   // Play one note: two detuned sines + ADSR envelope
   function playNote(freq, vol, attack, hold, release, when) {
+    if (when < audioCtx.currentTime - 0.05) return; // already past — skip to avoid clicks
     const o1 = audioCtx.createOscillator();
     const o2 = audioCtx.createOscillator();
     const env = audioCtx.createGain();
@@ -1068,10 +1069,16 @@ function startMusic() {
   }
 
   // ── Pad: slow C-major chord arpeggio, cycles every ~14 s
+  // nextPadTime tracks absolute audioCtx time so late setTimeout fires skip
+  // ahead cleanly rather than bunching all notes into the present (which pops).
   const padChord = [C3, E3, G3, C4, E4];
+  let nextPadTime = null;
   function schedulePad() {
-    const t = audioCtx.currentTime + 0.1;
-    padChord.forEach((freq, i) => playNote(freq, 0.07, 2.2, 4.5, 3.5, t + i * 1.1));
+    if (nextPadTime === null) nextPadTime = audioCtx.currentTime + 0.1;
+    // If timer fired late and we've blown past this cycle, advance to next
+    while (nextPadTime < audioCtx.currentTime - 0.05) nextPadTime += 13.5;
+    padChord.forEach((freq, i) => playNote(freq, 0.07, 2.2, 4.5, 3.5, nextPadTime + i * 1.1));
+    nextPadTime += 13.5;
     setTimeout(schedulePad, 13_500);
   }
 
