@@ -110,19 +110,22 @@ import * as THREE from 'three';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { EffectComposer }  from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass }      from 'three/addons/postprocessing/RenderPass.js';
+import { SSAOPass }        from 'three/addons/postprocessing/SSAOPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass }      from 'three/addons/postprocessing/OutputPass.js';
 import { GLTFLoader }      from 'three/addons/loaders/GLTFLoader.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ─── RENDERER ────────────────────────────────────────────────────────────────
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFShadowMap;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 0.82;
 document.body.appendChild(renderer.domElement);
+const isMobile = navigator.maxTouchPoints > 0;
 
 // ─── SCENE ───────────────────────────────────────────────────────────────────
 const scene = new THREE.Scene();
@@ -135,6 +138,17 @@ camera.position.set(0, 1.62, 2.2);
 // ─── POST-PROCESSING ─────────────────────────────────────────────────────────
 const composer = new EffectComposer(renderer);
 composer.addPass(new RenderPass(scene, camera));
+
+// Screen-space ambient occlusion — darkens contact points and corners
+const ssaoPass = new SSAOPass(scene, camera, window.innerWidth, window.innerHeight);
+ssaoPass.kernelRadius = 0.5;
+ssaoPass.kernelSize   = 16;
+ssaoPass.minDistance  = 0.001;
+ssaoPass.maxDistance  = 0.12;
+ssaoPass.output = SSAOPass.OUTPUT.Default;
+ssaoPass.enabled = !isMobile;
+composer.addPass(ssaoPass);
+
 const bloomPass = new UnrealBloomPass(
   new THREE.Vector2(window.innerWidth, window.innerHeight),
   0.90,  // strength
@@ -286,11 +300,11 @@ function makeWallTex() {
 
 // ─── MATERIALS ───────────────────────────────────────────────────────────────
 const wallTex  = makeWallTex();
-const wallMat  = new THREE.MeshLambertMaterial({ map: wallTex }); // warm wood planks
-const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
-const ceilMat  = new THREE.MeshLambertMaterial({ color: 0x6a4a2e }); // dark warm wood
-const woodMat  = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
-const frameMat = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
+const wallMat  = new THREE.MeshStandardMaterial({ map: wallTex,        roughness: 0.92, metalness: 0 });
+const floorMat = new THREE.MeshStandardMaterial({ map: floorTex,       roughness: 0.80, metalness: 0 });
+const ceilMat  = new THREE.MeshStandardMaterial({ color: 0x6a4a2e,     roughness: 0.90, metalness: 0 });
+const woodMat  = new THREE.MeshStandardMaterial({ color: 0x7a5233,     roughness: 0.78, metalness: 0 });
+const frameMat = new THREE.MeshStandardMaterial({ color: 0x7a5233,     roughness: 0.80, metalness: 0 });
 
 // ─── ROOM ────────────────────────────────────────────────────────────────────
 // Floor
@@ -311,7 +325,7 @@ const frameMat = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
 
 // Ceiling beams
 {
-  const beamMat = new THREE.MeshLambertMaterial({ color: 0x4a2e14 });
+  const beamMat = new THREE.MeshStandardMaterial({ color: 0x4a2e14, roughness: 0.88, metalness: 0 });
   [-1.4, 0, 1.4].forEach(bz => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(RW + 0.1, 0.14, 0.20), beamMat);
     m.position.set(0, RH - 0.07, bz);
@@ -490,15 +504,15 @@ new GLTFLoader().load('assets/cat.glb', gltf => {
   cat.traverse(n => {
     if (n.isMesh) {
       n.castShadow = true; n.receiveShadow = true;
-      n.material = new THREE.MeshLambertMaterial({ color: 0x3a2e24 });
+      n.material = new THREE.MeshStandardMaterial({ color: 0x3a2e24, roughness: 0.82, metalness: 0 });
     }
   });
   scene.add(cat);
 });
 
 // ── Bookshelf on back wall
-const shelfMat  = new THREE.MeshLambertMaterial({ color: 0x6b4c2e });
-const shelfBack = new THREE.MeshLambertMaterial({ color: 0x3e2810 }); // darker back panel
+const shelfMat  = new THREE.MeshStandardMaterial({ color: 0x6b4c2e, roughness: 0.86, metalness: 0 });
+const shelfBack = new THREE.MeshStandardMaterial({ color: 0x3e2810, roughness: 0.92, metalness: 0 });
 const SX = 0, SZ = RD / 2 - 0.13;
 const SW = RW, SH = RH, SD = 0.26;
 const SY0 = 0.0;
@@ -516,24 +530,32 @@ box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf1Y, SZ);
 box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf2Y, SZ);
 box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf3Y, SZ);
 
-// Books — fills shelf width by cycling through colors palette
+// Books — all shelves merged into a single draw call with vertex colors
+const _bookGeos = [];
 function addBooks(baseY, maxH, colors) {
   let bx = SX - SW / 2 + 0.06;
   const limit = SX + SW / 2 - 0.06;
   let i = 0;
+  const _col = new THREE.Color();
   while (bx < limit) {
     const col = colors[i++ % colors.length];
     const bw = 0.05 + Math.random() * 0.04;
     const bh = maxH * (0.55 + Math.random() * 0.45);
     const lean = (Math.random() - 0.5) * 0.10;
-    const m = new THREE.Mesh(
-      new THREE.BoxGeometry(bw, bh, SD * 0.82),
-      new THREE.MeshLambertMaterial({ color: col })
+    const geo = new THREE.BoxGeometry(bw, bh, SD * 0.82);
+    const mat = new THREE.Matrix4().compose(
+      new THREE.Vector3(bx + bw / 2, baseY + bh / 2, SZ),
+      new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), lean),
+      new THREE.Vector3(1, 1, 1)
     );
-    m.position.set(bx + bw / 2, baseY + bh / 2, SZ);
-    m.rotation.y = lean;
-    m.castShadow = true;
-    scene.add(m);
+    geo.applyMatrix4(mat);
+    _col.setHex(col);
+    const cv = new Float32Array(geo.attributes.position.count * 3);
+    for (let v = 0; v < geo.attributes.position.count; v++) {
+      cv[v * 3] = _col.r; cv[v * 3 + 1] = _col.g; cv[v * 3 + 2] = _col.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(cv, 3));
+    _bookGeos.push(geo);
     bx += bw + 0.006 + Math.random() * 0.012;
   }
 }
@@ -542,12 +564,22 @@ addBooks(SY0 + 0.04,   0.52, [0x5a2820,0x7a5828,0x4a3818,0x6a3818,0x8a6830,0x5a3
 addBooks(shelf1Y + 0.04, 0.46, [0x6a3020,0x5a4820,0x3a3018,0x7a5030,0x4a2818,0x6a5838,0x8a6028,0x4a3818,0x5a2828,0x7a4828,0x3a2e20,0x6a4030,0x8a5828,0x5a3820,0x4a4018]);
 addBooks(shelf2Y + 0.04, 0.38, [0x5a3028,0x7a5020,0x4a3818,0x6a4830,0x3a2818,0x8a6038,0x5a4020,0x6a3020,0x7a5838,0x4a2e18,0x5a4828,0x6a5030,0x3a3018,0x7a4030,0x5a3828]);
 addBooks(shelf3Y + 0.04, 0.32, [0x6a3828,0x5a4018,0x4a2e18,0x7a5830,0x3a2818,0x6a4828,0x8a5828,0x5a3028,0x6a5038,0x4a3818,0x7a4030,0x5a2820,0x6a4820,0x3a3018]);
+{
+  const merged = mergeGeometries(_bookGeos);
+  const bookMesh = new THREE.Mesh(
+    merged,
+    new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.85, metalness: 0 })
+  );
+  bookMesh.castShadow = true;
+  bookMesh.receiveShadow = true;
+  scene.add(bookMesh);
+}
 
 
 // ── Fireplace (left wall, centred — faces +x into the room)
 {
-  const stoneMat  = new THREE.MeshLambertMaterial({ color: 0x7a6650 });
-  const mantelMat = new THREE.MeshLambertMaterial({ color: 0x4a2e14 });
+  const stoneMat  = new THREE.MeshStandardMaterial({ color: 0x7a6650, roughness: 0.96, metalness: 0 });
+  const mantelMat = new THREE.MeshStandardMaterial({ color: 0x4a2e14, roughness: 0.75, metalness: 0 });
   const sootMat   = new THREE.MeshBasicMaterial({ color: 0x0e0c08 });
 
   const FX = -RW / 2, FZ = 0, FD = 0.36; // left wall, z-centred, depth into room
@@ -976,7 +1008,6 @@ function startMusic() {
 function pauseMusic() { audioCtx?.suspend(); }
 
 // ─── CONTROLS ────────────────────────────────────────────────────────────────
-const isMobile = navigator.maxTouchPoints > 0;
 camera.rotation.order = 'YXZ';
 
 const overlay   = document.getElementById('overlay');
@@ -1189,6 +1220,7 @@ window.addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
   composer.setSize(window.innerWidth, window.innerHeight);
+  ssaoPass.setSize(window.innerWidth, window.innerHeight);
   bloomPass.resolution.set(window.innerWidth, window.innerHeight);
 });
 </script>
