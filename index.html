@@ -153,20 +153,25 @@ const RD = 5.0;   // depth  (z)
 
 // ─── LIGHTING ────────────────────────────────────────────────────────────────
 // Warm indoor ambient
-const ambientLight = new THREE.AmbientLight(0xc8d8b8, 0.38); // cool green-filtered forest light
+const ambientLight = new THREE.AmbientLight(0xd8c8a0, 0.46);
 scene.add(ambientLight);
 
+// Warm interior fill — keeps shadowed walls from going cold
+const fillLight = new THREE.PointLight(0xff9050, 0.35, 12.0);
+fillLight.position.set(0, 2.0, 0);
+scene.add(fillLight);
+
 // Sunlight through window – slightly angled cool daylight
-const sun = new THREE.DirectionalLight(0xd8e8c8, 0.5); // dappled canopy light
+const sun = new THREE.DirectionalLight(0xf8d8a0, 0.85);
 sun.position.set(-1.8, 3.5, -RD / 2 - 5);
 sun.target.position.set(0, 0.5, RD / 2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far  = 32;
-sun.shadow.camera.left = -8;  sun.shadow.camera.right  = 8;
-sun.shadow.camera.top  =  8;  sun.shadow.camera.bottom = -4;
-sun.shadow.bias = -0.002;
+sun.shadow.camera.far  = 50;
+sun.shadow.camera.left = -14; sun.shadow.camera.right  = 14;
+sun.shadow.camera.top  = 12;  sun.shadow.camera.bottom = -6;
+sun.shadow.bias = -0.0005;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -176,39 +181,116 @@ function makeFloorTex() {
   const c = document.createElement('canvas');
   c.width = c.height = 512;
   const ctx = c.getContext('2d');
-  const plankH = 72;
-  const tones = ['#8c6b45', '#7b5c38', '#9c7652', '#856440', '#a07d56'];
-  for (let y = 0; y < 512; y += plankH) {
-    ctx.fillStyle = tones[Math.floor(y / plankH) % tones.length];
-    ctx.fillRect(0, y, 512, plankH);
-    // grain lines
-    ctx.save(); ctx.globalAlpha = 0.06;
-    for (let g = 0; g < 5; g++) {
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 0.6;
+
+  const pw = 14, pl = 56, gap = 2;
+  const tones = ['#3e2c1a','#321e10','#46301e','#3a2618','#4a3422','#362416'];
+  const sq2 = Math.sqrt(2);
+
+  // Dark grout
+  ctx.fillStyle = '#0e0804';
+  ctx.fillRect(0, 0, 512, 512);
+
+  function plank(cx, cy, angle) {
+    const col = tones[Math.floor(Math.random() * tones.length)];
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(angle);
+    ctx.fillStyle = col;
+    ctx.fillRect(-pl/2 + gap/2, -pw/2 + gap/2, pl - gap, pw - gap);
+    // grain lines along the plank
+    ctx.globalAlpha = 0.07;
+    ctx.strokeStyle = '#2a1408';
+    ctx.lineWidth = 0.5;
+    for (let g = 1; g <= 3; g++) {
+      const gy = -pw/2 + gap/2 + g * (pw - gap) / 4;
       ctx.beginPath();
-      const gy = y + (g / 5) * plankH + (Math.random() - 0.5) * 6;
-      ctx.moveTo(0, gy); ctx.lineTo(512, gy + (Math.random() - 0.5) * 10);
+      ctx.moveTo(-pl/2 + gap, gy + (Math.random()-0.5)*2);
+      ctx.lineTo( pl/2 - gap, gy + (Math.random()-0.5)*2);
       ctx.stroke();
     }
     ctx.restore();
-    // gap
-    ctx.fillStyle = '#2e1c0a';
-    ctx.fillRect(0, y + plankH - 2, 512, 2);
   }
+
+  // Herringbone: columns alternate +45° and -45°, offset by half a row
+  const colSpacing = pl / sq2;
+  const rowSpacing = pw * sq2;
+  const cols = Math.ceil(512 / colSpacing) + 4;
+  const rows = Math.ceil(512 / rowSpacing) + 4;
+
+  for (let ci = -2; ci < cols; ci++) {
+    for (let ri = -2; ri < rows; ri++) {
+      const cx = ci * colSpacing;
+      const cy = ri * rowSpacing + (ci % 2 === 0 ? 0 : rowSpacing / 2);
+      plank(cx, cy, ci % 2 === 0 ? Math.PI/4 : -Math.PI/4);
+    }
+  }
+
   const t = new THREE.CanvasTexture(c);
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  t.repeat.set(RW / 1.5, RD / 1.5);
+  t.repeat.set(RW / 2, RD / 2);
   return t;
 }
 
 const floorTex = makeFloorTex();
 
+function makeWallTex() {
+  const c = document.createElement('canvas');
+  c.width = c.height = 512;
+  const ctx = c.getContext('2d');
+
+  const logs = [
+    { base: '#3a2410', hi: '#5a3a22', lo: '#1e1008' },
+    { base: '#2e1c0c', hi: '#4a2e18', lo: '#180e06' },
+    { base: '#422a14', hi: '#623e28', lo: '#221408' },
+    { base: '#362010', hi: '#503220', lo: '#1c100a' },
+    { base: '#2a1808', hi: '#3e2810', lo: '#140c04' },
+  ];
+  const logH = 82, chink = 5;
+
+  // Dark chinking
+  ctx.fillStyle = '#0a0604';
+  ctx.fillRect(0, 0, 512, 512);
+
+  let li = 0;
+  for (let y = 0; y < 512; y += logH + chink, li++) {
+    const log = logs[li % logs.length];
+    // Rounded log surface — gradient lighter at crown, darker at base
+    const grad = ctx.createLinearGradient(0, y, 0, y + logH);
+    grad.addColorStop(0.0,  log.hi);
+    grad.addColorStop(0.25, log.base);
+    grad.addColorStop(0.75, log.base);
+    grad.addColorStop(1.0,  log.lo);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, y + chink / 2, 512, logH - chink / 2);
+
+    // Subtle grain running along the log
+    ctx.save();
+    ctx.globalAlpha = 0.045;
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 0.7;
+    for (let g = 0; g < 5; g++) {
+      const gx = Math.random() * 400;
+      ctx.beginPath();
+      ctx.moveTo(gx,        y + logH * 0.3 + (Math.random()-0.5) * 10);
+      ctx.lineTo(gx + 80,   y + logH * 0.3 + (Math.random()-0.5) * 10);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(RW / 2, RH / 2);
+  return t;
+}
+
 // ─── MATERIALS ───────────────────────────────────────────────────────────────
-const wallMat  = new THREE.MeshLambertMaterial({ color: 0xe8e2f0 }); // soft lavender-white
+const wallTex  = makeWallTex();
+const wallMat  = new THREE.MeshLambertMaterial({ map: wallTex }); // warm wood planks
 const floorMat = new THREE.MeshLambertMaterial({ map: floorTex });
-const ceilMat  = new THREE.MeshLambertMaterial({ color: 0xf0ecf8 }); // pale lilac ceiling
+const ceilMat  = new THREE.MeshLambertMaterial({ color: 0x6a4a2e }); // dark warm wood
 const woodMat  = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
-const frameMat = new THREE.MeshLambertMaterial({ color: 0xf0ead6 });
+const frameMat = new THREE.MeshLambertMaterial({ color: 0x7a5233 });
 
 // ─── ROOM ────────────────────────────────────────────────────────────────────
 // Floor
@@ -225,6 +307,17 @@ const frameMat = new THREE.MeshLambertMaterial({ color: 0xf0ead6 });
   m.rotation.x = Math.PI / 2;
   m.position.y = RH;
   scene.add(m);
+}
+
+// Ceiling beams
+{
+  const beamMat = new THREE.MeshLambertMaterial({ color: 0x4a2e14 });
+  [-1.4, 0, 1.4].forEach(bz => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(RW + 0.1, 0.14, 0.20), beamMat);
+    m.position.set(0, RH - 0.07, bz);
+    m.castShadow = true; m.receiveShadow = true;
+    scene.add(m);
+  });
 }
 
 // Helper – add a plain rectangular wall plane
@@ -244,32 +337,41 @@ addWall(RD, RH, -RW / 2, RH / 2, 0, Math.PI / 2);
 addWall(RD, RH,  RW / 2, RH / 2, 0, -Math.PI / 2);
 
 // ─── FRONT WALL WITH WINDOW HOLE ─────────────────────────────────────────────
-const WW = 1.9;   // window width
-const WH = 1.55;  // window height
+const WW = 2.8;   // window width
+const WH = 1.7;   // window height
 const WX = -WW / 2;  // window left edge (local x)
-const WY = 0.82;     // window bottom edge (local y)
+const WY = 0.65;     // window bottom edge (local y)
 
-const frontShape = new THREE.Shape();
-frontShape.moveTo(-RW / 2, 0);
-frontShape.lineTo( RW / 2, 0);
-frontShape.lineTo( RW / 2, RH);
-frontShape.lineTo(-RW / 2, RH);
-frontShape.closePath();
-
-const winHole = new THREE.Path();
-winHole.moveTo(WX,      WY);
-winHole.lineTo(WX + WW, WY);
-winHole.lineTo(WX + WW, WY + WH);
-winHole.lineTo(WX,      WY + WH);
-winHole.closePath();
-frontShape.holes.push(winHole);
-
+// Front wall built from four PlaneGeometry panels so texture UVs align with the other walls.
+// Each panel gets a cloned texture with repeat/offset matching its world position.
 {
-  const m = new THREE.Mesh(new THREE.ShapeGeometry(frontShape), wallMat);
-  m.position.z = -RD / 2;
-  // ShapeGeometry normal is +z by default → faces inward ✓
-  m.receiveShadow = true;
-  scene.add(m);
+  const S = 2; // texture world-units-per-tile (matches makeWallTex repeat basis)
+  function frontPanel(pw, ph, cx, cy) {
+    // world left/bottom of this panel
+    const wx0 = cx - pw / 2, wy0 = cy - ph / 2;
+    const t = wallTex.clone();
+    t.needsUpdate = true;
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(pw / S, ph / S);
+    t.offset.set((wx0 + RW / 2) / S, wy0 / S);
+    const m = new THREE.Mesh(
+      new THREE.PlaneGeometry(pw, ph),
+      new THREE.MeshLambertMaterial({ map: t })
+    );
+    m.position.set(cx, cy, -RD / 2);
+    m.receiveShadow = true;
+    scene.add(m);
+  }
+
+  const leftW  = RW / 2 + WX;          // wall left of window
+  const rightW = RW / 2 - (WX + WW);   // wall right of window
+  const botH   = WY;                    // wall below window
+  const topH   = RH - (WY + WH);       // wall above window
+
+  frontPanel(leftW,  RH,   -RW/2 + leftW/2,        RH/2);
+  frontPanel(rightW, RH,    RW/2 - rightW/2,        RH/2);
+  frontPanel(WW,     botH,  WX + WW/2,              botH/2);
+  frontPanel(WW,     topH,  WX + WW/2,              WY + WH + topH/2);
 }
 
 // ─── WINDOW FRAME ────────────────────────────────────────────────────────────
@@ -290,39 +392,34 @@ frameBox(WW + fT * 2, fT, fD, wCX, WY + WH + fT / 2, fZ); // top
 frameBox(WW + fT * 2, fT, fD, wCX, WY - fT / 2,       fZ); // bottom
 frameBox(fT, WH,      fD, WX - fT / 2,      wCY, fZ); // left
 frameBox(fT, WH,      fD, WX + WW + fT / 2, wCY, fZ); // right
-// Window sill
+// Window sill — chunky wood ledge with front nosing
 {
-  const m = new THREE.Mesh(new THREE.BoxGeometry(WW + fT * 2 + 0.22, 0.055, 0.20), frameMat);
-  m.position.set(wCX, WY - 0.012, -RD / 2 + 0.105);
-  m.castShadow = true; m.receiveShadow = true;
-  scene.add(m);
+  const sillW = WW + fT * 2 + 0.26;
+  const sillD = 0.28;
+  const sillH = 0.10;
+  // Top clears the frame bar bottom (WY - fT) by 0.008; back clears the wall by 0.008
+  const sillTopY = WY - fT - 0.008;
+  const sillCY   = sillTopY - sillH / 2;
+  const sillCZ   = -RD / 2 + 0.008 + sillD / 2;
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(sillW, sillH, sillD), woodMat);
+  body.position.set(wCX, sillCY, sillCZ);
+  body.castShadow = true; body.receiveShadow = true;
+  scene.add(body);
+
 }
 
-// ─── LIGHT SHAFT ─────────────────────────────────────────────────────────────
-// Subtle translucent box – just a hint of volumetric light
-{
-  const g = new THREE.BoxGeometry(WW - 0.01, WH - 0.01, RD);
-  const mat = new THREE.MeshBasicMaterial({
-    color: 0xfff5d8,
-    transparent: true, opacity: 0.045,
-    depthWrite: false, side: THREE.BackSide,
-    blending: THREE.AdditiveBlending,
-  });
-  const m = new THREE.Mesh(g, mat);
-  m.position.set(wCX, wCY, -0.01);
-  scene.add(m);
-}
 
 
 // ─── DUST MOTES ──────────────────────────────────────────────────────────────
-const N_MOTES = 280;
+const N_MOTES = 140;
 const motePos = new Float32Array(N_MOTES * 3);
 const moteOff = new Float32Array(N_MOTES);  // random phase offsets
 
 for (let i = 0; i < N_MOTES; i++) {
   motePos[i * 3]     = (Math.random() - 0.5) * WW * 0.92;
   motePos[i * 3 + 1] = WY + Math.random() * WH;
-  motePos[i * 3 + 2] = -RD / 2 + Math.random() * RD;
+  motePos[i * 3 + 2] = -RD / 2 + Math.random() * (RD - 0.28);
   moteOff[i] = Math.random() * Math.PI * 2;
 }
 
@@ -330,8 +427,8 @@ const moteGeo = new THREE.BufferGeometry();
 moteGeo.setAttribute('position', new THREE.BufferAttribute(motePos, 3));
 const moteMat = new THREE.PointsMaterial({
   color: 0xffffcc,
-  size: 0.022, sizeAttenuation: true,
-  transparent: true, opacity: 0.55,
+  size: 0.012, sizeAttenuation: true,
+  transparent: true, opacity: 0.15,
   depthWrite: false,
 });
 scene.add(new THREE.Points(moteGeo, moteMat));
@@ -345,70 +442,141 @@ function box(w, h, d, mat, x, y, z, ry = 0) {
   scene.add(m); return m;
 }
 
-// ── Table
-const TX = -1.4, TZ = 0.5;
-box(1.45, 0.055, 0.78, woodMat, TX, 0.77, TZ);
-[[-0.62, -0.32], [0.62, -0.32], [-0.62, 0.32], [0.62, 0.32]].forEach(([lx, lz]) =>
-  box(0.055, 0.77, 0.055, woodMat, TX + lx, 0.385, TZ + lz)
-);
 
-// ── Chair
-const CX = -1.4, CZ = 1.1;
-box(0.52, 0.048, 0.52, woodMat, CX, 0.45, CZ);       // seat
-box(0.52, 0.60,  0.04, woodMat, CX, 0.78, CZ + 0.26); // backrest
-[[-0.21, -0.21], [0.21, -0.21], [-0.21, 0.21], [0.21, 0.21]].forEach(([lx, lz]) =>
-  box(0.042, 0.45, 0.042, woodMat, CX + lx, 0.225, CZ + lz)
-);
+// ── Rug (circular, medallion pattern)
+{
+  function makeRugTex() {
+    const c = document.createElement('canvas');
+    c.width = c.height = 512;
+    const ctx = c.getContext('2d');
+    const cx = 256, cy = 256, R = 248;
 
-// ── Cat — GLB model on the table
+    // Base field: dark earthy brown-red
+    ctx.fillStyle = '#2a1616';
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Single border ring
+    ctx.strokeStyle = '#3e3222';
+    ctx.lineWidth = 14;
+    ctx.beginPath();
+    ctx.arc(cx, cy, R - 14, 0, Math.PI * 2);
+    ctx.stroke();
+
+
+    return new THREE.CanvasTexture(c);
+  }
+
+  const rugMat = new THREE.MeshLambertMaterial({ map: makeRugTex() });
+  const m = new THREE.Mesh(new THREE.CircleGeometry(1.3, 72), rugMat);
+  m.rotation.x = -Math.PI / 2;
+  m.position.set(0, 0.002, 0);
+  m.receiveShadow = true;
+  scene.add(m);
+}
+
+// ── Cat — GLB model on the fireplace mantel
 new GLTFLoader().load('assets/cat.glb', gltf => {
   const cat = gltf.scene;
-
-  // Fit the model to roughly 0.35 units tall
   const catBox = new THREE.Box3().setFromObject(cat);
   const size = catBox.getSize(new THREE.Vector3());
   const scale = 0.35 / Math.max(size.x, size.y, size.z);
   cat.scale.setScalar(scale);
   cat.rotation.x = -Math.PI / 2;
-  cat.rotation.z = Math.PI - Math.PI / 8;
-
-  // Sit it on the table top
+  cat.rotation.z = Math.PI - Math.PI / 8 - 15 * Math.PI / 180;
   catBox.setFromObject(cat);
-  cat.position.set(TX, 0.798 - catBox.min.y, TZ);
-
+  cat.position.set(-2.2, 1.196 - catBox.min.y, 0);
   cat.traverse(n => {
     if (n.isMesh) {
       n.castShadow = true; n.receiveShadow = true;
-      n.material = new THREE.MeshLambertMaterial({ color: 0xb8956e }); // warm tan
+      n.material = new THREE.MeshLambertMaterial({ color: 0x3a2e24 });
     }
   });
   scene.add(cat);
 });
 
 // ── Bookshelf on back wall
-const shelfMat = new THREE.MeshLambertMaterial({ color: 0x6b4c2e });
-const SX = 1.2, SZ = RD / 2 - 0.13;
-box(2.1, 0.048, 0.24, shelfMat, SX, 1.72, SZ);          // shelf board
-box(0.048, 0.38, 0.24, shelfMat, SX - 1.0, 1.53, SZ);   // left bracket
-box(0.048, 0.38, 0.24, shelfMat, SX + 1.0, 1.53, SZ);   // right bracket
+const shelfMat  = new THREE.MeshLambertMaterial({ color: 0x6b4c2e });
+const shelfBack = new THREE.MeshLambertMaterial({ color: 0x3e2810 }); // darker back panel
+const SX = 0, SZ = RD / 2 - 0.13;
+const SW = RW, SH = RH, SD = 0.26;
+const SY0 = 0.0;
 
-// Books
-const bookColors = [0x8b2020, 0x1a4a8b, 0x2a6b2a, 0x8b6b20, 0x5a1a8b, 0x8b4a1a, 0x306060];
-let bx = SX - 0.92;
-bookColors.forEach(col => {
-  const bw = 0.09 + Math.random() * 0.07;
-  const bh = 0.19 + Math.random() * 0.08;
-  const m = new THREE.Mesh(
-    new THREE.BoxGeometry(bw, bh, 0.20),
-    new THREE.MeshLambertMaterial({ color: col })
-  );
-  m.position.set(bx + bw / 2, 1.724 + bh / 2, SZ);
-  m.rotation.y = (Math.random() - 0.5) * 0.14;
-  m.castShadow = true;
-  scene.add(m);
-  bx += bw + 0.008;
-});
+// Carcass
+box(0.04, SH, SD, shelfMat, SX - SW/2 + 0.02, SY0 + SH/2, SZ);
+box(0.04, SH, SD, shelfMat, SX + SW/2 - 0.02, SY0 + SH/2, SZ);
+box(SW,   0.04, SD, shelfMat, SX, SY0 + 0.02,      SZ);
+box(SW,   0.04, SD, shelfMat, SX, SY0 + SH - 0.02, SZ);
+box(SW - 0.08, SH, 0.02, shelfBack, SX, SY0 + SH/2, RD/2 - 0.01);
 
+// Inner shelves
+const shelf1Y = SY0 + 0.62, shelf2Y = SY0 + 1.24, shelf3Y = SY0 + 1.88;
+box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf1Y, SZ);
+box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf2Y, SZ);
+box(SW - 0.08, 0.04, SD, shelfMat, SX, shelf3Y, SZ);
+
+// Books — fills shelf width by cycling through colors palette
+function addBooks(baseY, maxH, colors) {
+  let bx = SX - SW / 2 + 0.06;
+  const limit = SX + SW / 2 - 0.06;
+  let i = 0;
+  while (bx < limit) {
+    const col = colors[i++ % colors.length];
+    const bw = 0.05 + Math.random() * 0.04;
+    const bh = maxH * (0.55 + Math.random() * 0.45);
+    const lean = (Math.random() - 0.5) * 0.10;
+    const m = new THREE.Mesh(
+      new THREE.BoxGeometry(bw, bh, SD * 0.82),
+      new THREE.MeshLambertMaterial({ color: col })
+    );
+    m.position.set(bx + bw / 2, baseY + bh / 2, SZ);
+    m.rotation.y = lean;
+    m.castShadow = true;
+    scene.add(m);
+    bx += bw + 0.006 + Math.random() * 0.012;
+  }
+}
+
+addBooks(SY0 + 0.04,   0.52, [0x5a2820,0x7a5828,0x4a3818,0x6a3818,0x8a6830,0x5a3c18,0x3a2e18,0x6a4820,0x7a3820,0x4a2e18,0x5a4828,0x8a5030,0x3a2818,0x6a5038,0x7a6040,0x5a3028]);
+addBooks(shelf1Y + 0.04, 0.46, [0x6a3020,0x5a4820,0x3a3018,0x7a5030,0x4a2818,0x6a5838,0x8a6028,0x4a3818,0x5a2828,0x7a4828,0x3a2e20,0x6a4030,0x8a5828,0x5a3820,0x4a4018]);
+addBooks(shelf2Y + 0.04, 0.38, [0x5a3028,0x7a5020,0x4a3818,0x6a4830,0x3a2818,0x8a6038,0x5a4020,0x6a3020,0x7a5838,0x4a2e18,0x5a4828,0x6a5030,0x3a3018,0x7a4030,0x5a3828]);
+addBooks(shelf3Y + 0.04, 0.32, [0x6a3828,0x5a4018,0x4a2e18,0x7a5830,0x3a2818,0x6a4828,0x8a5828,0x5a3028,0x6a5038,0x4a3818,0x7a4030,0x5a2820,0x6a4820,0x3a3018]);
+
+
+// ── Fireplace (left wall, centred — faces +x into the room)
+{
+  const stoneMat  = new THREE.MeshLambertMaterial({ color: 0x7a6650 });
+  const mantelMat = new THREE.MeshLambertMaterial({ color: 0x4a2e14 });
+  const sootMat   = new THREE.MeshBasicMaterial({ color: 0x0e0c08 });
+
+  const FX = -RW / 2, FZ = 0, FD = 0.36; // left wall, z-centred, depth into room
+  const FC = FX + FD / 2; // x-centre of surround geometry
+  // Stone columns (flank opening in z)
+  box(FD, 0.92, 0.22, stoneMat, FC, 0.46, FZ - 0.485);
+  box(FD, 0.92, 0.22, stoneMat, FC, 0.46, FZ + 0.485);
+  // Lintel
+  box(FD, 0.22, 1.19, stoneMat, FC, 0.92 + 0.11, FZ);
+  // Mantel shelf
+  box(FD + 0.10, 0.055, 1.36, mantelMat, FX + (FD + 0.10) / 2, 0.92 + 0.22 + 0.028, FZ);
+  // Firebox interior — back + floor
+  box(0.05, 0.92, 0.75, sootMat, FX + 0.025, 0.46, FZ);
+  box(FD, 0.03, 0.75, sootMat, FC, 0.015, FZ);
+
+  // Emissive flame
+  const flameMat = new THREE.MeshBasicMaterial({ color: 0xff6010 });
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.10, 0.24, 7), flameMat);
+  flame.position.set(FX + 0.22, 0.16, FZ);
+  scene.add(flame);
+
+  // Firelight
+  const fireLight = new THREE.PointLight(0xff7020, 2.0, 7.0);
+  fireLight.position.set(FX + 0.30, 0.40, FZ);
+  fireLight.castShadow = false;
+  scene.add(fireLight);
+  scene._fireLight = fireLight;
+  scene._flame = flame;
+}
 
 // ─── EXTERIOR SCENE — dense forest wrapping all sides ────────────────────────
 
@@ -424,12 +592,13 @@ const groundMat = new THREE.MeshLambertMaterial({ color: 0x1e2a14 });
 
 // Shared tree materials — updated by season
 const leafMat  = new THREE.MeshLambertMaterial({ color: 0x1e4018 });
-const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3a2010 });
+const trunkMat = new THREE.MeshLambertMaterial({ color: 0x7a5535 });
 
 // Pine tree — 4 stacked cones
 function addTree(x, z, scale = 1.0) {
   const s = scale;
-  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.10*s, 0.17*s, 2.0*s, 7), trunkMat);
+  const tw = 0.75 + Math.random() * 0.65; // trunk width multiplier 0.75–1.4
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.10*s*tw, 0.17*s*tw, 2.0*s, 7), trunkMat);
   trunk.position.set(x, 1.0*s, z);
   trunk.castShadow = true; trunk.receiveShadow = true;
   scene.add(trunk);
@@ -460,29 +629,75 @@ function addShrub(x, z) {
   });
 }
 
-// ── FRONT (z < -RD/2) ── towering trees straight ahead
-addTree(  0.3, -RD/2 -  2.5, 3.8);
-addTree( -1.6, -RD/2 -  3.2, 3.5);
-addTree(  2.8, -RD/2 -  3.8, 4.0);
-addTree( -3.4, -RD/2 -  4.5, 3.2);
-addTree(  1.0, -RD/2 -  8,   2.5);
-addTree( -2.0, -RD/2 -  9,   2.3);
-addTree(  5.0, -RD/2 - 10,   2.7);
-addTree( -5.0, -RD/2 - 11,   2.4);
-addTree(  0.0, -RD/2 - 15,   2.0);
-addTree(  4.0, -RD/2 - 20,   1.8);
-addTree( -4.0, -RD/2 - 22,   1.7);
-addShrub(  1.5, -RD/2 - 2.0);
-addShrub( -1.0, -RD/2 - 2.8);
-addShrub(  3.5, -RD/2 - 3.5);
+// ── FRONT (z < -RD/2) ── forest straight ahead
+// Immediately outside — flank the window, leave centre breathable
+addTree( -2.2, -RD/2 - 1.8, 3.9);  // left, close, tall
+addTree(  3.0, -RD/2 - 2.2, 4.2);  // right, close, very tall
+addTree( -4.8, -RD/2 - 1.5, 3.6);  // far left, very close
+addTree(  5.2, -RD/2 - 1.9, 3.4);  // far right, very close
+// Just behind those — fill the gaps, create density
+addTree(  1.2, -RD/2 - 3.5, 3.7);  // slight right of centre
+addTree( -3.5, -RD/2 - 4.0, 3.3);  // left cluster
+addTree(  4.5, -RD/2 - 3.8, 3.0);  // right cluster
+addTree( -6.5, -RD/2 - 3.2, 3.1);  // outer left
+// Mid distance
+addTree( -1.0, -RD/2 - 7.0, 2.8);
+addTree(  3.5, -RD/2 - 6.5, 2.6);
+addTree( -5.0, -RD/2 - 7.5, 2.5);
+addTree(  6.5, -RD/2 - 6.0, 2.4);
+// Deep background — scale down for perspective
+addTree(  0.8, -RD/2 - 12,  2.1);
+addTree( -3.0, -RD/2 - 14,  2.0);
+addTree(  4.0, -RD/2 - 18,  1.8);
+addTree( -1.5, -RD/2 - 22,  1.6);
+// Ground cover
+addShrub( -1.5, -RD/2 - 2.5);
+addShrub(  2.0, -RD/2 - 3.0);
+addShrub( -4.0, -RD/2 - 2.0);
+addShrub(  5.5, -RD/2 - 2.8);
+addShrub( -2.8, -RD/2 - 4.5);
+addShrub(  0.5, -RD/2 - 5.0);
+addShrub(  4.0, -RD/2 - 5.5);
+addShrub( -6.0, -RD/2 - 3.5);
+addShrub(  6.5, -RD/2 - 4.0);
+addShrub( -1.0, -RD/2 - 8.0);
+addShrub(  3.0, -RD/2 - 9.0);
+addShrub( -4.5, -RD/2 - 7.0);
 
+
+// ── LEFT SIDE (x < -RW/2)
+addTree( -RW/2 - 1.5, -RD/2 - 1.0, 3.8);
+addTree( -RW/2 - 2.8, -RD/2 - 0.5, 3.4);
+addTree( -RW/2 - 1.2,  0.0,         3.6);
+addTree( -RW/2 - 3.0,  1.5,         3.2);
+addTree( -RW/2 - 2.0, -2.5,         3.0);
+addTree( -RW/2 - 4.5,  0.5,         2.6);
+addTree( -RW/2 - 1.8,  RD/2 + 1.0,  3.1);
+addShrub(-RW/2 - 1.0, -RD/2 - 0.5);
+addShrub(-RW/2 - 2.2,  0.8);
+addShrub(-RW/2 - 1.5, -RD/2 - 2.0);
+addShrub(-RW/2 - 3.0, -1.5);
+addShrub(-RW/2 - 1.8,  2.2);
+addShrub(-RW/2 - 2.8,  RD/2 - 0.5);
+addShrub(-RW/2 - 1.2, -RD/2 - 3.5);
+addShrub(-RW/2 - 4.0,  1.0);
 
 // ── RIGHT SIDE (x > +RW/2)
-addTree(  RW/2 + 1.8, -1.0, 3.4);
-addTree(  RW/2 + 2.5,  1.5, 3.0);
-addTree(  RW/2 + 1.5, -3.5, 3.2);
-addTree(  RW/2 + 3.5,  3.5, 2.7);
-addTree(  RW/2 + 5.0, -0.5, 2.5);
+addTree(  RW/2 + 1.5, -RD/2 - 1.0, 3.8);
+addTree(  RW/2 + 2.8, -RD/2 - 0.5, 3.4);
+addTree(  RW/2 + 1.8, -1.0,         3.4);
+addTree(  RW/2 + 2.5,  1.5,         3.0);
+addTree(  RW/2 + 1.5, -3.5,         3.2);
+addTree(  RW/2 + 3.5,  3.5,         2.7);
+addTree(  RW/2 + 5.0, -0.5,         2.5);
+addShrub( RW/2 + 1.0, -RD/2 - 0.5);
+addShrub( RW/2 + 2.2,  0.8);
+addShrub( RW/2 + 1.5, -RD/2 - 2.0);
+addShrub( RW/2 + 3.0, -1.5);
+addShrub( RW/2 + 1.8,  2.2);
+addShrub( RW/2 + 2.8,  RD/2 - 0.5);
+addShrub( RW/2 + 1.2, -RD/2 - 3.5);
+addShrub( RW/2 + 4.0,  1.0);
 
 // ── BEHIND (z > +RD/2) ── forest closes in from the back
 addTree(  0.5, RD/2 + 2.0, 3.5);
@@ -490,8 +705,13 @@ addTree( -2.0, RD/2 + 2.5, 3.0);
 addTree(  2.5, RD/2 + 3.0, 3.2);
 addTree( -0.5, RD/2 + 5.5, 2.5);
 addTree(  4.0, RD/2 + 4.0, 2.8);
-addShrub( 1.0, RD/2 + 1.5);
-addShrub(-1.5, RD/2 + 2.0);
+addShrub(  1.0,  RD/2 + 1.5);
+addShrub( -1.5,  RD/2 + 2.0);
+addShrub(  3.0,  RD/2 + 1.8);
+addShrub( -3.5,  RD/2 + 2.5);
+addShrub(  0.5,  RD/2 + 3.5);
+addShrub( -2.5,  RD/2 + 1.2);
+addShrub(  4.5,  RD/2 + 2.2);
 
 // ─── SEASONS ─────────────────────────────────────────────────────────────────
 const SEASON_CYCLE = 54; // 4 × 13.5s pad cycle — one season per pad cycle
@@ -499,25 +719,25 @@ const SEASON_CYCLE = 54; // 4 × 13.5s pad cycle — one season per pad cycle
 // [spring, summer, autumn, winter]
 const SEASONS = [
   { name: 'spring',
-    bg: 0x9abba0, fog: 0x8aab90,
+    bg: 0xb8d4bc, fog: 0xa8c4ac,
     leaf: 0x5a9a4a, shrub: 0x4a8a3a, ground: 0x2a3a18,
-    ambCol: 0xd8ecd0, ambInt: 0.44,
-    sunCol: 0xffe8d0, sunInt: 0.60 },
+    ambCol: 0xe0d8b8, ambInt: 0.50,
+    sunCol: 0xffe8c8, sunInt: 0.90 },
   { name: 'summer',
-    bg: 0x7a9e80, fog: 0x6a8e70,
-    leaf: 0x1e4018, shrub: 0x2a4a1a, ground: 0x1e2a14,
-    ambCol: 0xc8d8b8, ambInt: 0.38,
-    sunCol: 0xd8e8c8, sunInt: 0.50 },
+    bg: 0xb0d0b8, fog: 0xa0c0a8,
+    leaf: 0x2a5822, shrub: 0x366628, ground: 0x1e2a14,
+    ambCol: 0xd8c8a0, ambInt: 0.54,
+    sunCol: 0xf8e0a8, sunInt: 1.05 },
   { name: 'autumn',
-    bg: 0xa07840, fog: 0x906830,
+    bg: 0xc09050, fog: 0xb08040,
     leaf: 0xb05810, shrub: 0x7a4010, ground: 0x3a2810,
-    ambCol: 0xead0a0, ambInt: 0.46,
-    sunCol: 0xffcc70, sunInt: 0.68 },
+    ambCol: 0xf0c880, ambInt: 0.54,
+    sunCol: 0xffcc60, sunInt: 1.0 },
   { name: 'winter',
-    bg: 0xb8ccd8, fog: 0xa8bcc8,
+    bg: 0xd0e4f0, fog: 0xc0d4e0,
     leaf: 0x3a3a3a, shrub: 0x303030, ground: 0xd0d8d0,
-    ambCol: 0xc0cce0, ambInt: 0.34,
-    sunCol: 0xd0e8f8, sunInt: 0.32 },
+    ambCol: 0xc8d0e0, ambInt: 0.40,
+    sunCol: 0xd8ecff, sunInt: 0.55 },
 ];
 
 // Pre-convert to THREE.Color for lerping
@@ -565,7 +785,6 @@ function applySeasons(t) {
   const snowAmt = idx === 3 ? 1 :
                   idx === 2 ? Math.max(0, (frac - 0.7) / 0.3) : 0;
   snowMat.opacity     = snowAmt * 0.75;
-  snowSillMat.opacity = snowAmt * 0.95;
 }
 
 // ── Autumn falling leaves
@@ -604,20 +823,13 @@ const snowMat = new THREE.PointsMaterial({
 });
 scene.add(new THREE.Points(snowGeo, snowMat));
 
-// ── Snow on window sill
-const snowSillMat = new THREE.MeshLambertMaterial({
-  color: 0xeef4ff, transparent: true, opacity: 0,
-});
-{
-  const m = new THREE.Mesh(new THREE.BoxGeometry(WW + fT * 2 + 0.22, 0.025, 0.20), snowSillMat);
-  m.position.set(wCX, WY - 0.001, -RD / 2 + 0.105);
-  scene.add(m);
-}
+
 
 // ─── AMBIENT MUSIC (Web Audio API, procedural) ───────────────────────────────
 let audioCtx = null;
 let masterGain = null;
 let purrGain = null;
+
 
 function startMusic() {
   if (audioCtx) { audioCtx.resume(); return; }
@@ -740,21 +952,21 @@ function startMusic() {
   purrGain = audioCtx.createGain();
 
   purrOsc.type  = purrOsc2.type = 'sawtooth';
-  purrOsc.frequency.value  = 65.41;          // C2 — same as drone
-  purrOsc2.frequency.value = 65.41 * 1.012;  // subtle chorus
-  purrLFO.frequency.value  = 25;             // purr rhythm (~cat range)
-  purrLFOGain.gain.value   = 0.45;           // depth of modulation
-  purrMod.gain.value       = 0.5;            // DC offset so gain stays positive
+  purrOsc.frequency.value  = 65.41;
+  purrOsc2.frequency.value = 65.41 * 1.012;
+  purrLFO.frequency.value  = 25;
+  purrLFOGain.gain.value   = 0.45;
+  purrMod.gain.value       = 0.5;
   purrFilt.type = 'lowpass';
-  purrFilt.frequency.value = 200;            // keep only the warm rumble
+  purrFilt.frequency.value = 200;
   purrFilt.Q.value = 0.7;
-  purrGain.gain.value = 0;                   // starts silent, driven by proximity
+  purrGain.gain.value = 0;
 
   purrOsc.connect(purrFilt);
   purrOsc2.connect(purrFilt);
   purrFilt.connect(purrMod);
   purrLFO.connect(purrLFOGain);
-  purrLFOGain.connect(purrMod.gain);         // LFO modulates amplitude
+  purrLFOGain.connect(purrMod.gain);
   purrMod.connect(purrGain);
   purrGain.connect(masterGain);
 
@@ -913,19 +1125,19 @@ function animate() {
     pos.array[i * 3]     += Math.sin(t * 0.4 + ph)       * 0.00045;
     pos.array[i * 3 + 1] += 0.0028 + Math.sin(t * 0.25 + ph * 1.3) * 0.0009;
     pos.array[i * 3 + 2] += Math.sin(t * 0.3 + ph * 0.7) * 0.00025;
-    // Wrap: keep motes inside the light shaft volume
+    // Wrap: keep motes between window and bookshelf
     const hw = WW * 0.46, hh = WH * 0.46;
     if (pos.array[i * 3]     >  hw) pos.array[i * 3]     = -hw;
     if (pos.array[i * 3]     < -hw) pos.array[i * 3]     =  hw;
     if (pos.array[i * 3 + 1] > WY + WH + 0.15) pos.array[i * 3 + 1] = WY - 0.05;
-    if (pos.array[i * 3 + 2] > RD / 2)  pos.array[i * 3 + 2] = -RD / 2 + 0.05;
+    if (pos.array[i * 3 + 2] > RD / 2 - 0.28) pos.array[i * 3 + 2] = -RD / 2 + 0.05;
   }
   pos.needsUpdate = true;
 
-  // ── Purr proximity
+  // ── Purr proximity (cat on mantel)
   if (purrGain && audioCtx) {
-    const dx = camera.position.x - TX;
-    const dz = camera.position.z - TZ;
+    const dx = camera.position.x - (-2.2);
+    const dz = camera.position.z - 0;
     const dist = Math.sqrt(dx * dx + dz * dz);
     const vol = THREE.MathUtils.clamp(1 - dist / 3.0, 0, 1) * 0.7;
     purrGain.gain.setTargetAtTime(vol, audioCtx.currentTime, 0.6);
@@ -951,6 +1163,18 @@ function animate() {
     if (sp.array[i*3+1] < -1) { sp.array[i*3+1] = 16; sp.array[i*3] = (Math.random()-0.5)*20; }
   }
   sp.needsUpdate = true;
+
+  // ── Fire flicker — driven by audioCtx time so it pauses/resumes with music
+  {
+    const at = audioCtx?.currentTime ?? t;
+    if (scene._fireLight) {
+      scene._fireLight.intensity = 1.6 + Math.sin(at * 1.86) * 0.25 + Math.sin(at * 3.72) * 0.12;
+    }
+    if (scene._flame) {
+      scene._flame.scale.y = 0.95 + Math.sin(at * 1.86) * 0.05 + Math.sin(at * 3.72) * 0.025;
+      scene._flame.position.y = 0.16 + (scene._flame.scale.y - 1) * 0.06;
+    }
+  }
 
   // Gentle dreamy camera breathe — always present, just barely perceptible
   camera.position.y = 1.62 + Math.sin(t * 0.4) * 0.012;
